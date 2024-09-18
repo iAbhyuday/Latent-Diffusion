@@ -1,9 +1,9 @@
 import torch as pt
 from torch import nn
-from latent_diffusion.modules.encoder import Encoder
-from latent_diffusion.modules.decoder import Decoder
-from latent_diffusion.modules.quantizer import Quantizer
-from latent_diffusion.utils.misc import PerceptualLoss
+from latent_diffusion.modules import Encoder
+from latent_diffusion.modules import Decoder
+from latent_diffusion.modules import Quantizer
+from latent_diffusion.modules import PerceptualLoss
 
 
 class VQVAE(nn.Module):

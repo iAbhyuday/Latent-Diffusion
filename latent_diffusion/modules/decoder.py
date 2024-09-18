@@ -1,6 +1,6 @@
 import torch as pt
 from torch import nn
-from latent_diffusion.models.resblock import ResBlock
+from .resblock import ResBlock
 
 class Decoder(nn.Module):
     def __init__(
