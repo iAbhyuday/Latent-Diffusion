@@ -1,6 +1,6 @@
 import torch 
 from torch import nn
-
+from torch.nn.functional import one_hot
 
 class Quantizer(nn.Module):
 
@@ -40,8 +40,17 @@ class Quantizer(nn.Module):
             )
         self.commit_cost = commit_cost
 
-
     def forward(self, z: torch.Tensor):
+        """
+        The [`Quantizer`] forward method.
+
+        Args:
+            z (`torch.Tensor`):
+                Latent embedding from encoder of shape [N, C, H, W]
+        Returns:
+            `tuple`:
+                quantized_code, commitment_loss, codebook_loss, codebook_indices
+        """
         b, c, h, w = z.shape
         # (N, 1, d)
         flat_z = z.view(-1, 1, self.embed_dim)
@@ -55,12 +64,9 @@ class Quantizer(nn.Module):
 
         # (N, )
         encoding = torch.argmin(dist, dim=1)
-
         # (N, n)
-        idx = nn.functional.one_hot(
-            encoding,
-            num_classes=self.codebook_len
-            ).float()
+        idx = one_hot(
+            encoding, num_classes=self.codebook_len).float()
         #  (N, n) * (n, d) -> (N, d)
         code = idx @ self.codebook.data
         # (b, c, h, w)
@@ -71,7 +77,8 @@ class Quantizer(nn.Module):
                     # (n, N) * (N, d) -> (n, d)
                     code_update = idx.T @ flat_z.squeeze(1)
                     # (n, )
-                    n_i = self.decay * self.n_i + (1 - self.decay) * idx.sum(0)
+                    n_i = self.decay * self.get_buffer("n_i") + \
+                        (1 - self.decay) * idx.sum(0)
                     #  stable n (Laplace smoothing)
                     self.n_i = (n_i + self.eps) / \
                         (b + self.codebook_len * self.eps) * b

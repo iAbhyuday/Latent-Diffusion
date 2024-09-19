@@ -1,5 +1,6 @@
 from torch import nn
 
+
 def init_weights(m):
     """ Kaining Initialization """
     if isinstance(m, nn.Conv2d):

@@ -1,6 +1,6 @@
 import torch as pt
 from torch import nn
-from latent_diffusion.utils.init import init_weights
+from latent_diffusion.utils import init_weights
 
 
 class ResBlock(nn.Module):
@@ -14,6 +14,7 @@ class ResBlock(nn.Module):
         mode (`str`, *optional*, defaults to "Identity"):
             type of ResBlock. Choose between "Down" and "Identity"
         conv_shortcut (`bool`, *optional*, defaults to True):
+            Use 3x3 conv to transform the residual link
     """
     def __init__(
             self,
