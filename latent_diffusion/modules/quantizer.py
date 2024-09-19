@@ -1,9 +1,17 @@
-import torch 
+import torch
 from torch import nn
 from torch.nn.functional import one_hot
 
-class Quantizer(nn.Module):
 
+class Quantizer(nn.Module):
+    """
+    Vector quantizer module.
+    Parameters:
+        codebook_len (int): number of codebook vectors
+        embed_dim (int): dimensions codebook vectors
+        commit_cost (float): commit cost (beta) for commitment loss term.
+        use_ema (bool): use ema for codebook update
+    """
     def __init__(
         self,
         codebook_len: int = 512,
@@ -11,14 +19,6 @@ class Quantizer(nn.Module):
         commit_cost: float = 0.25,
         use_ema: bool = True,
     ):
-        """
-        Vector quantizer module.
-        Parameters:
-            codebook_len (int): number of codebook vectors
-            embed_dim (int): dimensions codebook vectors
-            commit_cost (float): commit cost (beta) for commitment loss term.
-            use_ema (bool): use ema for codebook update
-        """
         super(Quantizer, self).__init__()
         self.embed_dim = embed_dim
         self.codebook_len = codebook_len
@@ -49,7 +49,8 @@ class Quantizer(nn.Module):
                 Latent embedding from encoder of shape [N, C, H, W]
         Returns:
             `tuple`:
-                quantized_code, commitment_loss, codebook_loss, codebook_indices
+                quantized_code, commitment_loss, codebook_loss,
+                codebook_indices
         """
         b, c, h, w = z.shape
         # (N, 1, d)
