@@ -49,7 +49,6 @@ class Encoder(nn.Module):
         for i, _ in enumerate(self.ch_mult):
             down_block = nn.ModuleDict()
             block = nn.ModuleDict()
-            attnblock = nn.ModuleDict()
             block_in = ch_factor*in_ch_mult[i]
             block_out = ch_factor*self.ch_mult[i]
             for j in range(self.num_resblock):
@@ -58,9 +57,7 @@ class Encoder(nn.Module):
                 block_in = block_out
             down_block.add_module(f"resblock_{i}", block)
             if current_resolution in self.attn_resolution:
-                for a_i in range(self.num_attn_block):
-                    attnblock.add_module(f"attnblock_{i}_{a_i}", AttnBlock(block_out))
-                down_block.add_module(f"attnblock_{i}", attnblock)
+                down_block.add_module(f"attnblock_{i}", AttnBlock(block_out))
 
             if i != len(self.ch_mult)-1:
                 down_block.add_module(
@@ -75,7 +72,32 @@ class Encoder(nn.Module):
                 nn.Conv2d(block_out, out_channels, kernel_size=3, padding=1))
 
     def forward(self, x: pt.Tensor):
+        """
+        The [`Encoder`] forward method
+        Args:
+            x (`Tensor`): Input Tesnsor of shape [B, C, H, W]
+        Returns:
+            [`Tensor`]:
+                Encoder output
+        """
         h = self.in_conv(x)
-        for i,_ in enumerate(self.ch_mult):
+        print(h.shape)
+        for i, _ in enumerate(self.ch_mult):
             for j in range(self.num_resblock):
-                pass
+                print(f"DownBlock {i} resblock {i} {j}", end=" ")
+                h = self.layers[f"DownBlock_{i}"][f"resblock_{i}"][f"resblock_{i}_{j}"](h)
+                print(h.shape)
+            if (f"attnblock_{i}" in self.layers[f"DownBlock_{i}"].keys()):
+                print(f"DownBlock {i} AttnBlock {i} ", end=" ")
+                _, h = self.layers[f"DownBlock_{i}"][f"attnblock_{i}"](h)
+                print(h.shape)
+
+            if ("downblock" in self.layers[f"DownBlock_{i}"].keys()):
+                print(f"DownBlock {i} down {i}", end=" ")
+                h = self.layers[f"DownBlock_{i}"]["downblock"](h)
+                print(h.shape)
+        h = self.layers["OutNorm"](h)
+        return h
+
+
+
