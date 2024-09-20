@@ -77,6 +77,14 @@ class Encoder(nn.Module):
             [`Tensor`]:
                 Encoder output
         """
+        try:
+            assert self.resolution == x.shape[-1]
+        except AssertionError:
+            print(
+                f"""
+                Expected resolution : {self.resolution}, got {x.shape[-1]}.
+                Check module resolution.""")
+
         h = self.in_conv(x)
         for i, _ in enumerate(self.ch_mult):
             for j in range(self.num_resblock):

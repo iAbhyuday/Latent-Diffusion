@@ -155,3 +155,9 @@ checkpoint = {
 
 torch.save(checkpoint, "model_checkpoint.pth")
 writer.close()
+
+
+#%%
+from latent_diffusion.modules import Encoder
+import torch as pt
+# %%
