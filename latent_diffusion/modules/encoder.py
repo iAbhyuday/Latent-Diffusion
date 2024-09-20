@@ -12,7 +12,6 @@ class Encoder(nn.Module):
         in_channels (`int`): Number of input channels
         out_channels (`int`): Number of output channels
         num_resblocks (`int`): Number of ResNet Blocks
-        num_attn_blocks (`int`): Number of Attention blocks
         ch_factor (`int`): initial channnel factor. Default is 64
         ch_mult (`List[int]`): List of channel multipliers
         attn_resolution `List[int]`:
@@ -26,7 +25,6 @@ class Encoder(nn.Module):
             in_channels=3,
             out_channels=256,
             num_resblock=3,
-            num_attn_block=2,
             attn_resolution=[28, 56, 112],
             ch_factor=64,
             ch_mult=[1, 2, 4, 8],
@@ -39,7 +37,6 @@ class Encoder(nn.Module):
         self.num_resblock = num_resblock
         self.ch_factor = ch_factor
         self.ch_mult = ch_mult
-        self.num_attn_block = num_attn_block
         self.attn_resolution = attn_resolution
         current_resolution = self.resolution
         self.in_conv = nn.Conv2d(
@@ -81,23 +78,15 @@ class Encoder(nn.Module):
                 Encoder output
         """
         h = self.in_conv(x)
-        print(h.shape)
         for i, _ in enumerate(self.ch_mult):
             for j in range(self.num_resblock):
-                print(f"DownBlock {i} resblock {i} {j}", end=" ")
                 h = self.layers[f"DownBlock_{i}"][f"resblock_{i}"][f"resblock_{i}_{j}"](h)
-                print(h.shape)
-            if (f"attnblock_{i}" in self.layers[f"DownBlock_{i}"].keys()):
-                print(f"DownBlock {i} AttnBlock {i} ", end=" ")
+
+            if f"attnblock_{i}" in self.layers[f"DownBlock_{i}"].keys():
                 _, h = self.layers[f"DownBlock_{i}"][f"attnblock_{i}"](h)
-                print(h.shape)
 
-            if ("downblock" in self.layers[f"DownBlock_{i}"].keys()):
-                print(f"DownBlock {i} down {i}", end=" ")
+            if "downblock" in self.layers[f"DownBlock_{i}"].keys():
                 h = self.layers[f"DownBlock_{i}"]["downblock"](h)
-                print(h.shape)
         h = self.layers["OutNorm"](h)
+        h = self.layers["OutConv"](h)
         return h
-
-
-
