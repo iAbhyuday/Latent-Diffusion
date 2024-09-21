@@ -9,14 +9,14 @@ from latent_diffusion.modules import PerceptualLoss
 class VQVAE(nn.Module):
     def __init__(self, config: dict):
         super(VQVAE, self).__init__()
-        self.config = config
-        self.codebook_size = config["codebook_size"]
-        self.embed_dim = config["embed_dim"]
-        self.use_ema = config["quantizer"]["use_ema"]
-        self.encoder = Encoder(**config["encoder"],)
-        self.vq = Quantizer(**config["quantizer"])
-        self.decoder = Decoder(**config["decoder"])
-        self.percept_loss = PerceptualLoss(**config["percept_loss"])
+        self.codebook_size = codebook_size
+        self.embed_dim = embed_dim
+        self.use_ema = use_ema
+        self.encoder = Encoder(3)
+        self.pre_quant = nn.LazyConv2d(embed_dim, kernel_size=3, padding=1)
+        self.vq = Quantizer(self.codebook_size, self.embed_dim, use_ema=self.use_ema)
+        self.decoder = Decoder(2, 3)
+        self.percept_loss = PerceptualLoss(layers=[1, 6, 11, 20, 29], normalized=False)
 
     
     def forward(self, input_image):
@@ -27,4 +27,3 @@ class VQVAE(nn.Module):
         percept_loss = self.percept_loss(x_, input_image)
 
         return x_, code, commitment_loss, codebook_loss, recon_loss, percept_loss, encoding
-    
