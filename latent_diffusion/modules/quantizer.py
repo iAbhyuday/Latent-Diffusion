@@ -7,28 +7,28 @@ class Quantizer(nn.Module):
     """
     Vector quantizer module.
     Parameters:
-        codebook_len (int): number of codebook vectors
+        codebook_size (int): number of codebook vectors
         embed_dim (int): dimensions codebook vectors
         commit_cost (float): commit cost (beta) for commitment loss term.
         use_ema (bool): use ema for codebook update
     """
     def __init__(
         self,
-        codebook_len: int = 512,
+        codebook_size: int = 512,
         embed_dim: int = 256,
         commit_cost: float = 0.25,
         use_ema: bool = True,
     ):
         super(Quantizer, self).__init__()
         self.embed_dim = embed_dim
-        self.codebook_len = codebook_len
+        self.codebook_size = codebook_size
         self.use_ema = use_ema
         if self.use_ema:
             self.register_buffer(
                 "codebook",
-                torch.FloatTensor(torch.randn((codebook_len, embed_dim)))
+                torch.FloatTensor(torch.randn((codebook_size, embed_dim)))
             )
-            self.register_buffer("n_i", torch.zeros((codebook_len,)))
+            self.register_buffer("n_i", torch.zeros((codebook_size,)))
             self.register_buffer(
                 "e_i", self.get_buffer("codebook").data.clone()
                 )
@@ -36,7 +36,7 @@ class Quantizer(nn.Module):
             self.register_buffer("eps", torch.tensor(1e-5))
         else:
             self.codebook = nn.Parameter(
-                torch.rand((self.codebook_len, embed_dim)), requires_grad=True
+                torch.rand((self.codebook_size, embed_dim)), requires_grad=True
             )
         self.commit_cost = commit_cost
 
@@ -67,7 +67,7 @@ class Quantizer(nn.Module):
         encoding = torch.argmin(dist, dim=1)
         # (N, n)
         idx = one_hot(
-            encoding, num_classes=self.codebook_len).float()
+            encoding, num_classes=self.codebook_size).float()
         #  (N, n) * (n, d) -> (N, d)
         code = idx @ self.codebook.data
         # (b, c, h, w)
@@ -82,7 +82,7 @@ class Quantizer(nn.Module):
                         (1 - self.decay) * idx.sum(0)
                     #  stable n (Laplace smoothing)
                     self.n_i = (n_i + self.eps) / \
-                        (b + self.codebook_len * self.eps) * b
+                        (b + self.codebook_size * self.eps) * b
                     # (n, d)
                     self.e_i = self.decay * self.e_i + \
                         (1 - self.decay) * code_update

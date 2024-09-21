@@ -24,7 +24,7 @@ class Encoder(nn.Module):
             resolution=224,
             in_channels=3,
             out_channels=256,
-            num_resblock=3,
+            num_resblocks=3,
             attn_resolution=[28, 56, 112],
             ch_factor=64,
             ch_mult=[1, 2, 4, 8],
@@ -34,7 +34,7 @@ class Encoder(nn.Module):
         self.resolution = resolution
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.num_resblock = num_resblock
+        self.num_resblock = num_resblocks
         self.ch_factor = ch_factor
         self.ch_mult = ch_mult
         self.attn_resolution = attn_resolution

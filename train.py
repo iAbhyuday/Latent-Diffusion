@@ -161,3 +161,4 @@ writer.close()
 from latent_diffusion.modules import Encoder
 import torch as pt
 # %%
+Encoder()
