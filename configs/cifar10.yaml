@@ -1,0 +1,40 @@
+trainer:
+  name: "CIFA10"
+  train_batch_size: 128
+  val_batch_size: 64
+  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  lr: 1e-3
+  device: "cuda:0"
+  
+encoder:
+  resolution: 32
+  in_channels: 3
+  out_channels: 256
+  num_resblocks: 3
+  ch_factor: 64
+  ch_mult: [1, 4, 8]
+  mid_block: False
+
+quantizer:
+  use_ema: True
+  codebook_size: 128
+  embed_dim: 256
+  commit_cost: 0.25
+
+decoder:
+  resolution: 4
+  in_channels: 256
+  out_channels: 3
+  scale_factor: 2.0
+  num_resblocks: 3
+  attn_resolution: []
+  ch_factor: 64
+  ch_mult: [1, 4, 8]
+  mid_block: False
+
+perceptual_loss:
+  layers: []
+  normalized: True
+  scale: 0.01
+  device: "cuda:0"
+

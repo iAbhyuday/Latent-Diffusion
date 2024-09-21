@@ -39,9 +39,12 @@ class Encoder(nn.Module):
         self.ch_mult = ch_mult
         self.attn_resolution = attn_resolution
         current_resolution = self.resolution
+        
         self.in_conv = nn.Conv2d(
             in_channels, self.ch_factor, kernel_size=3, padding=1)
+        
         in_ch_mult = (1,) + tuple(ch_mult)
+        
         self.layers = nn.ModuleDict()
         for i, _ in enumerate(self.ch_mult):
             down_block = nn.ModuleDict()
