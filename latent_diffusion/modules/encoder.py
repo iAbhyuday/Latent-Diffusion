@@ -16,8 +16,6 @@ class Encoder(nn.Module):
         ch_mult (`List[int]`): List of channel multipliers
         attn_resolution `List[int]`:
             list of resolutions from which to start applying attention
-        mid_block (`bool`): Allow middle attention block (VQGAN)
-
     """
     def __init__(
             self,
@@ -27,8 +25,7 @@ class Encoder(nn.Module):
             num_resblocks=3,
             attn_resolution=[28, 56, 112],
             ch_factor=64,
-            ch_mult=[1, 2, 4, 8],
-            mid_block=False
+            ch_mult=[1, 2, 4, 8]
     ):
         super(Encoder, self).__init__()
         self.resolution = resolution
@@ -39,12 +36,9 @@ class Encoder(nn.Module):
         self.ch_mult = ch_mult
         self.attn_resolution = attn_resolution
         current_resolution = self.resolution
-        
         self.in_conv = nn.Conv2d(
             in_channels, self.ch_factor, kernel_size=3, padding=1)
-        
         in_ch_mult = (1,) + tuple(ch_mult)
-        
         self.layers = nn.ModuleDict()
         for i, _ in enumerate(self.ch_mult):
             down_block = nn.ModuleDict()
@@ -65,11 +59,16 @@ class Encoder(nn.Module):
                 current_resolution = current_resolution//2
             self.layers.add_module(f"DownBlock_{i}", down_block)
 
-        if not mid_block:
-            self.layers.add_module("OutNorm", nn.BatchNorm2d(block_out))
-            self.layers.add_module(
+        mid = nn.ModuleDict()
+        mid.add_module("mid_resblock1", ResBlock(block_in))
+        mid.add_module("mid_attn", AttnBlock(block_in))
+        mid.add_module("mid_resblock2", ResBlock(block_in))
+        self.layers.add_module("MidBlock", mid)
+        self.layers.add_module("OutNorm", nn.BatchNorm2d(block_out))
+        self.layers.add_module(
                 "OutConv",
                 nn.Conv2d(block_out, out_channels, kernel_size=3, padding=1))
+
 
     def forward(self, x: pt.Tensor):
         """
@@ -93,11 +92,16 @@ class Encoder(nn.Module):
             for j in range(self.num_resblock):
                 h = self.layers[f"DownBlock_{i}"][f"resblock_{i}"][f"resblock_{i}_{j}"](h)
 
-            if f"attnblock_{i}" in self.layers[f"DownBlock_{i}"].keys():
-                _, h = self.layers[f"DownBlock_{i}"][f"attnblock_{i}"](h)
+                if f"attnblock_{i}" in self.layers[f"DownBlock_{i}"].keys():
+                    _, h = self.layers[f"DownBlock_{i}"][f"attnblock_{i}"](h)
 
             if "downblock" in self.layers[f"DownBlock_{i}"].keys():
                 h = self.layers[f"DownBlock_{i}"]["downblock"](h)
+
+        h = self.layers["MidBlock"]["mid_resblock1"](h)
+        _, h = self.layers["MidBlock"]["mid_attn"](h)
+        h = self.layers["MidBlock"]["mid_resblock2"](h)
         h = self.layers["OutNorm"](h)
+        h = nn.functional.relu(h)
         h = self.layers["OutConv"](h)
         return h

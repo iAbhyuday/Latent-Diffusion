@@ -18,7 +18,7 @@ from latent_diffusion.models import VQVAE
 
 
 #%%
-with open("configs/cifar10.yaml") as f:
+with open("configs/cifar10.yaml", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 trainer_cfg = cfg["trainer"]
 # %%
