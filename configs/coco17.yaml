@@ -1,0 +1,40 @@
+trainer:
+  name: "Coco17-no-preconv"
+  train_batch_size: 128
+  val_batch_size: 64
+  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  lr: 3e-4
+  device: "cuda:0"
+  epochs: 100
+  
+encoder:
+  resolution: 56
+  in_channels: 3
+  out_channels: 256
+  num_resblocks: 2
+  ch_factor: 32
+  ch_mult: [1, 2, 4, 8]
+  attn_resolutions: [7, 14]
+
+quantizer:
+  use_ema: True
+  codebook_size: 8192
+  embed_dim: 4
+  commit_cost: 0.25
+
+decoder:
+  resolution: 56
+  in_channels: 4
+  out_channels: 3
+  num_resblocks: 2
+  attn_resolutions: [7, 14]
+  ch: 32
+  ch_mult: [1, 2, 4, 8]
+
+
+perceptual_loss:
+  layers: [1, 6, 11, 20, 29]
+  normalized: True
+  scale: 0.01
+  device: "cuda:0"
+

@@ -23,7 +23,7 @@ class Encoder(nn.Module):
             in_channels=3,
             out_channels=256,
             num_resblocks=3,
-            attn_resolution=[28, 56, 112],
+            attn_resolutions=[28, 56, 112],
             ch_factor=64,
             ch_mult=[1, 2, 4, 8]
     ):
@@ -34,7 +34,7 @@ class Encoder(nn.Module):
         self.num_resblock = num_resblocks
         self.ch_factor = ch_factor
         self.ch_mult = ch_mult
-        self.attn_resolution = attn_resolution
+        self.attn_resolution = attn_resolutions
         current_resolution = self.resolution
         self.in_conv = nn.Conv2d(
             in_channels, self.ch_factor, kernel_size=3, padding=1)

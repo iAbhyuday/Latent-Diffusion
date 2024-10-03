@@ -1,26 +1,35 @@
 #%%
+import os
+import yaml
 import torch
 from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoCaptions
-from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from torchvision.transforms import Compose, Normalize, Resize, ToTensor
-from latent_diffusion.models.vqvae import VQVAE
+from latent_diffusion.models import VQVAE
+from latent_diffusion.modules import PerceptualLoss
+from latent_diffusion.utils.metrics import measure_perplexity
 #%%
-torch.backends.cudnn.benchmark = True
-scaler = GradScaler()
+print("IMPORT COMPLETE")
+with open("configs/coco17.yaml", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+trainer_cfg = cfg["trainer"]
+
+#%%%
 writer = SummaryWriter(
-    log_dir="/mnt/sda/ab/projects/FY24/cmc/logs/VQAE-COCO-224"
+    log_dir=os.path.join(trainer_cfg["tensorboard_log_dir"], trainer_cfg["name"])
     )
 torch.set_printoptions(precision=3, sci_mode=False)
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device(trainer_cfg["device"])
+resolution = cfg["encoder"]["resolution"]
 #%%
 
 transforms = Compose(
     [
-        Resize((112, 112)),
+        Resize((resolution, resolution)),
         ToTensor(),
     ]
 )
@@ -59,91 +68,79 @@ val_data = CocoCaptions(
     transform=transforms,
     )
 
-train_data = DataLoader(train_data, batch_size=64, shuffle=True, num_workers=16, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True)
-val_data = DataLoader(val_data, batch_size=8, shuffle=True, num_workers=4, collate_fn=collate_fn)
+train_data = DataLoader(train_data, batch_size=trainer_cfg["train_batch_size"], shuffle=True, num_workers=16, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True)
+val_data = DataLoader(val_data, batch_size=trainer_cfg["val_batch_size"], shuffle=False, num_workers=4, collate_fn=collate_fn)
 
 x, y = next(iter(train_data))
-print(x.shape)
-print(x.min(), x.max())
-print(y)
 #%%
-use_ema = True
-codebook_size = 128
-lr = 3e-4
-n_epochs = 50
+model = VQVAE(cfg).to(trainer_cfg["device"])
+percept_loss = PerceptualLoss(cfg["perceptual_loss"])
 
-x = x.to(device)
-model = VQVAE(embed_dim=14*14, use_ema=use_ema).to(device)
-code = model.encoder(x)
-print(code.shape)
-code, commitment_loss, codebook_loss, encoding = model.vq(code)
-print(code.shape)
-x_ = model.decoder(code)
-print(x_.shape)
-optim = torch.optim.AdamW(model.parameters(), lr, weight_decay=1e-4)
+#%%
+
+#%%
+lr = float(trainer_cfg["lr"])
+n_epochs = trainer_cfg["epochs"]
+num_batches = len(train_data)
+optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+#optim.load_state_dict(checkpoint['optimizer_state_dict'])
+#sched = CosineAnnealingWarmRestarts(optim, T_0=num_batches*10, eta_min =7e-7)
 # %%
 
 
-num_batches = len(train_data)
+
 for e in range(0, n_epochs):
     r_recon = 0.0
     r_com = 0.0
     r_cdl = 0.0
     r_pl = 0.0
+    r_ppl = 0.0
 
     with tqdm(train_data, unit="batch", desc=f"Epoch {e+1}", position=0, leave=True) as data:
         model.train()
         for batch_idx, (x,_) in enumerate(data):
-
+            writer.add_scalar("lr", optim.param_groups[0]["lr"], e*num_batches + batch_idx)
             x = x.to(device)
 
-            x_, cd, cl, cdl, rl, pl, enc = model(x)
+            x_, cd, cl, cdl, rl, enc = model(x)
+            pl = percept_loss(x_, x).item()
             loss = cl + rl + pl
             
             r_recon += rl.item()
             r_com += cl.item()
             r_pl += pl.item()
-
-            if not use_ema:
+            ppl, clp = measure_perplexity(enc, cfg["quantizer"]["codebook_size"])
+            r_ppl += ppl.item()
+            if not cfg["quantizer"]["use_ema"]:
                 loss += cdl
                 r_cdl += cdl.item()
 
             optim.zero_grad()
             loss.backward()
             optim.step()
-            
-
+            #sched.step()
             data.set_postfix(
                 {
-                    "recon_loss": r_recon / num_batches,
-                    "commit_loss": r_com / num_batches,
-                    "codebook_loss": r_cdl / num_batches,
-                    "percept_loss": r_pl / num_batches
+                    "recon_loss": r_recon / (batch_idx+1),
+                    "commit_loss": r_com / (batch_idx+1),
+                    "codebook_loss": r_cdl / (batch_idx+1),
+                    "percept_loss": r_pl / (batch_idx+1),
+                    "perplexity": r_ppl/ (batch_idx+1)
                 }
             )
         writer.add_scalar("recon_loss", r_recon / num_batches, e)
         writer.add_scalar("commit_loss", r_com / num_batches, e)
         writer.add_scalar("codebook_loss", r_cdl / num_batches, e)
         writer.add_scalar("perceptual_loss", r_pl / num_batches, e)
-
-        data.set_postfix(
-            {
-                "recon_loss": r_recon / num_batches,
-                "commit_loss": r_com / num_batches,
-                "codebook_loss": r_cdl / num_batches,
-                "percept_loss": r_pl / num_batches
-            }
-        )
-
-        if e % 2 == 0:
-            with torch.no_grad():
-                model.eval()
-                x, _ = next(iter(val_data))
-                x = x.to(device)
-                x_, cd, cl, cdl, rl, pl, _ = model(x)
-
-                writer.add_images("input", x, e)
-                writer.add_images("output", x_, e)
+        writer.add_scalar("perplexity", r_ppl / num_batches, e)
+    if e % 1 == 0:
+        with torch.no_grad():
+            model.eval()
+            x, _ = next(iter(val_data))
+            x = x.to(device)
+            x_, cd, cl, cdl, rl, pl, _ = model(x)
+            writer.add_images("input", x, e)
+            writer.add_images("output", x_, e)
 
 
 # %%
@@ -153,12 +150,6 @@ checkpoint = {
     "optimizer_state_dict": optim.state_dict(),
 }
 
-torch.save(checkpoint, "model_checkpoint.pth")
+torch.save(checkpoint, f"{trainer_cfg['name']}_e{n_epochs}.pth")
 writer.close()
 
-
-#%%
-from latent_diffusion.modules import Encoder
-import torch as pt
-# %%
-Encoder()
