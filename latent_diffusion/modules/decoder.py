@@ -57,7 +57,7 @@ class Decoder(nn.Module):
             block = nn.ModuleList()
             attn = nn.ModuleList()
             block_out = ch*ch_mult[i_level]
-            for i_block in range(self.num_res_blocks+1):
+            for _ in range(self.num_res_blocks+1):
                 block.append(ResBlock(in_channels=block_in,
                                       out_channels=block_out))
                 block_in = block_out

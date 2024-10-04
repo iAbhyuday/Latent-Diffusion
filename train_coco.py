@@ -2,6 +2,7 @@
 import os
 import yaml
 import torch
+
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
@@ -74,7 +75,7 @@ val_data = DataLoader(val_data, batch_size=trainer_cfg["val_batch_size"], shuffl
 x, y = next(iter(train_data))
 #%%
 model = VQVAE(cfg).to(trainer_cfg["device"])
-percept_loss = PerceptualLoss(cfg["perceptual_loss"])
+percept_loss = PerceptualLoss(**cfg["perceptual_loss"]).to(trainer_cfg["device"])
 
 #%%
 
@@ -103,7 +104,7 @@ for e in range(0, n_epochs):
             x = x.to(device)
 
             x_, cd, cl, cdl, rl, enc = model(x)
-            pl = percept_loss(x_, x).item()
+            pl = percept_loss(x_, x)
             loss = cl + rl + pl
             
             r_recon += rl.item()
@@ -138,7 +139,7 @@ for e in range(0, n_epochs):
             model.eval()
             x, _ = next(iter(val_data))
             x = x.to(device)
-            x_, cd, cl, cdl, rl, pl, _ = model(x)
+            x_, cd, cl, cdl, rl, _ = model(x)
             writer.add_images("input", x, e)
             writer.add_images("output", x_, e)
 

@@ -1,16 +1,16 @@
 trainer:
   name: "Coco17-no-preconv"
-  train_batch_size: 128
+  train_batch_size: 256
   val_batch_size: 64
   tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
-  lr: 3e-4
+  lr: 3e-2
   device: "cuda:0"
   epochs: 100
   
 encoder:
   resolution: 56
   in_channels: 3
-  out_channels: 256
+  out_channels: 3
   num_resblocks: 2
   ch_factor: 32
   ch_mult: [1, 2, 4, 8]
@@ -24,7 +24,7 @@ quantizer:
 
 decoder:
   resolution: 56
-  in_channels: 4
+  in_channels: 3
   out_channels: 3
   num_resblocks: 2
   attn_resolutions: [7, 14]
