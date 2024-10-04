@@ -32,7 +32,7 @@ decoder:
 
 
 perceptual_loss:
-  layers: []
+  layers: [1,6,11,20,29]
   normalized: True
   scale: 0.01
   device: "cuda:0"
