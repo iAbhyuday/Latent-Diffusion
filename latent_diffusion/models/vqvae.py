@@ -10,7 +10,7 @@ class VQVAE(nn.Module):
     def __init__(self, config: dict):
         super(VQVAE, self).__init__()
         self.config = config
-        if config["encoder"]["out_channels"] != config["decoder"]["in_channels"]:
+        
         self.pre_quant = nn.Conv2d(
                 config["encoder"]["out_channels"],
                 config["quantizer"]["embed_dim"],
@@ -30,7 +30,6 @@ class VQVAE(nn.Module):
 
     def forward(self, input_image):
         z = self.encoder(input_image)
-        if hasattr(self, "pre_quant"):
         z = self.pre_quant(z)
         code, commitment_loss, codebook_loss, encoding = self.vq(z)
         code = self.post_quant(code)
