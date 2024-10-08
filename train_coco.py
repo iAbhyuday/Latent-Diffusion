@@ -4,12 +4,12 @@ import yaml
 import torch
 
 from torch.optim import Adam
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoCaptions
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from torchvision.transforms import Compose, Normalize, Resize, ToTensor
+from torchvision.transforms import Compose, Normalize, Resize, ToTensor, RandomHorizontalFlip, RandomVerticalFlip, RandomCrop
 from latent_diffusion.models import VQVAE
 from latent_diffusion.modules import PerceptualLoss
 from latent_diffusion.utils.metrics import measure_perplexity
@@ -31,6 +31,8 @@ resolution = cfg["encoder"]["resolution"]
 transforms = Compose(
     [
         Resize((resolution, resolution)),
+        RandomHorizontalFlip(),
+        RandomVerticalFlip(),
         ToTensor(),
     ]
 )
@@ -76,20 +78,22 @@ x, y = next(iter(train_data))
 #%%
 model = VQVAE(cfg).to(trainer_cfg["device"])
 percept_loss = PerceptualLoss(**cfg["perceptual_loss"]).to(trainer_cfg["device"])
-
+optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
 #%%
+if cfg["trainer"]["load_ckpt"]:
+    checkpoint = torch.load(cfg["trainer"]["load_ckpt"], weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optim.load_state_dict(checkpoint['optimizer_state_dict'])
 
 #%%
 lr = float(trainer_cfg["lr"])
-n_epochs = trainer_cfg["epochs"]
+n_epochs = 20
 num_batches = len(train_data)
-optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-#optim.load_state_dict(checkpoint['optimizer_state_dict'])
-#sched = CosineAnnealingWarmRestarts(optim, T_0=num_batches*10, eta_min =7e-7)
+sched = ReduceLROnPlateau(optim, mode="min", min_lr=1e-7, threshold=1e-4, factor=0.5, patience=5)
 # %%
 
 
-
+best=10
 for e in range(0, n_epochs):
     r_recon = 0.0
     r_com = 0.0
@@ -119,7 +123,8 @@ for e in range(0, n_epochs):
             optim.zero_grad()
             loss.backward()
             optim.step()
-            #sched.step()
+            
+            
             data.set_postfix(
                 {
                     "recon_loss": r_recon / (batch_idx+1),
@@ -129,11 +134,27 @@ for e in range(0, n_epochs):
                     "perplexity": r_ppl/ (batch_idx+1)
                 }
             )
+        
         writer.add_scalar("recon_loss", r_recon / num_batches, e)
         writer.add_scalar("commit_loss", r_com / num_batches, e)
         writer.add_scalar("codebook_loss", r_cdl / num_batches, e)
         writer.add_scalar("perceptual_loss", r_pl / num_batches, e)
         writer.add_scalar("perplexity", r_ppl / num_batches, e)
+    
+    rec_loss = (r_recon + r_pl)/num_batches
+    sched.step(r_recon/num_batches)
+    if rec_loss < best:
+        best = rec_loss
+        checkpoint = {
+            "epoch": e,
+            "lr": optim.param_groups[0]["lr"],
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optim.state_dict(),
+            }
+
+        torch.save(checkpoint, f"{trainer_cfg['name']}_best.pth")
+
+
     if e % 1 == 0:
         with torch.no_grad():
             model.eval()
@@ -153,4 +174,3 @@ checkpoint = {
 
 torch.save(checkpoint, f"{trainer_cfg['name']}_e{n_epochs}.pth")
 writer.close()
-

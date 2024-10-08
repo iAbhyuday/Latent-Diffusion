@@ -35,9 +35,8 @@ class Quantizer(nn.Module):
             self.register_buffer("decay", torch.tensor(0.99))
             self.register_buffer("eps", torch.tensor(1e-5))
         else:
-            self.codebook = nn.Parameter(
-                torch.rand((self.codebook_size, embed_dim)), requires_grad=True
-            )
+            self.codebook = nn.Parameter(torch.zeros(codebook_size, embed_dim), requires_grad=True)
+            self.codebook.data.uniform_(-1.0 / self.embed_dim, 1.0 / self.embed_dim)
         self.commit_cost = commit_cost
 
     def forward(self, z: torch.Tensor):
@@ -58,8 +57,8 @@ class Quantizer(nn.Module):
         # (N, n)
         dist = (
             (flat_z**2).sum(2)
-            + (self.codebook**2).sum(1)
-            - 2 * (flat_z.squeeze(1) @ self.codebook.T)
+            + (self.codebook.data**2).sum(1)
+            - 2 * (flat_z.squeeze(1) @ self.codebook.data.T)
         )
         # dist = torch.norm(flat_z - self.codebook, dim=2)
 
@@ -69,7 +68,9 @@ class Quantizer(nn.Module):
         idx = one_hot(
             encoding, num_classes=self.codebook_size).float()
         #  (N, n) * (n, d) -> (N, d)
+
         code = idx @ self.codebook.data
+
         # (b, c, h, w)
         code = code.view(z.shape)
         if self.use_ema:
