@@ -13,7 +13,7 @@ encoder:
   out_channels: 3
   num_resblocks: 3
   ch_factor: 64
-  ch_mult: [1, 4, 8]
+  ch_mult: [1, 2, 4]
 
 
 quantizer:
@@ -31,7 +31,7 @@ decoder:
   num_resblocks: 3
   attn_resolutions: []
   ch: 64
-  ch_mult: [1, 4, 8]
+  ch_mult: [1, 4, 4]
 
 
 perceptual_loss:
