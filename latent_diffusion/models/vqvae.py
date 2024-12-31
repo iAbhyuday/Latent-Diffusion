@@ -19,7 +19,7 @@ class VQVAE(nn.Module):
         self.encoder = Encoder(**config["encoder"])
         self.vq = build_quantizer(**config["quantizer"])
         self.post_quant = nn.Conv2d(
-                config["quantizer"]["embed_dim"],
+                config["quantizer"]["params"]["embed_dim"],
                 config["decoder"]["in_channels"],
                 kernel_size=(1, 1)
                  )
