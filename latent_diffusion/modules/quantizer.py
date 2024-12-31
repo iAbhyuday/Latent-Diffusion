@@ -137,14 +137,14 @@ class GumbleQuantizer(nn.Module):
         self.codebook = nn.Embedding(codebook_size, embed_dim)
 
     def forward(self, z):
-        z = self.proj(z)
+        logits = self.proj(z)
         hard = False if self.training else True
-        weight_logits = nn.functional.gumbel_softmax(z, tau=self.tau, hard=hard, dim=1)
-        logits = einsum("b n h w, n d -> b d h w", weight_logits, self.codebook.weight)
+        soft_logits = nn.functional.gumbel_softmax(logits, tau=self.tau, hard=hard, dim=1)
+        code = einsum("b n h w, n d -> b d h w", soft_logits, self.codebook.weight)
         qy = nn.functional.softmax(logits, dim=1)
         loss = self.kld_scale * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
         
-        return logits, loss, None, weight_logits.argmax(1)
+        return code, loss, None, soft_logits.argmax(1)
 
 
 def build_quantizer(config):
