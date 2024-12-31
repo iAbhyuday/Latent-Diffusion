@@ -2,7 +2,7 @@ import torch as pt
 from torch import nn
 from latent_diffusion.modules import Encoder
 from latent_diffusion.modules import Decoder
-from latent_diffusion.modules import Quantizer
+from latent_diffusion.modules import build_quantizer
 from latent_diffusion.modules import PerceptualLoss
 
 
@@ -17,7 +17,7 @@ class VQVAE(nn.Module):
                 kernel_size=(1, 1)
                 )
         self.encoder = Encoder(**config["encoder"])
-        self.vq = Quantizer(**config["quantizer"])
+        self.vq = build_quantizer(**config["quantizer"])
         self.post_quant = nn.Conv2d(
                 config["quantizer"]["embed_dim"],
                 config["decoder"]["in_channels"],

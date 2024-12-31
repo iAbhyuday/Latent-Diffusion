@@ -162,8 +162,8 @@ class GumbleQuantizer(nn.Module):
 
 def build_quantizer(config):
     if config["type"]=="ema":
-        return EMAQuantizer(**config)
+        return EMAQuantizer(**config["params"])
     elif config["type"]=="gumbel":
-        return GumbleQuantizer(**config)
+        return GumbleQuantizer(**config["params"])
     else:
-        return VectorQuantizer(**config)
+        return VectorQuantizer(**config["params"])
