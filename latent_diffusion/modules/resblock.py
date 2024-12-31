@@ -53,7 +53,9 @@ class ResBlock(nn.Module):
                     kernel_size=1, stride=stride, bias=False
                 )
 
-        self.bn_tr = nn.BatchNorm2d(out_channels)
+        self.norm = nn.GroupNorm(num_channels=out_channels,
+                                 num_groups=out_channels//8,
+                                 affine=True)
 
         self.layers = nn.Sequential(
             nn.Conv2d(
@@ -61,12 +63,16 @@ class ResBlock(nn.Module):
                 out_channels,
                 kernel_size=3, stride=stride, padding=1, bias=False
             ),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(num_channels=out_channels,
+                         num_groups=out_channels//8,
+                         affine=True),
             nn.ReLU(inplace=True),
             nn.Conv2d(
                 out_channels, out_channels, kernel_size=3,
                 padding="same", bias=False),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(num_channels=out_channels,
+                         num_groups=out_channels//8,
+                         affine=True),
         )
         self.layers.apply(init_weights)
         if hasattr(self, "tr_conv"):
@@ -80,5 +86,5 @@ class ResBlock(nn.Module):
             x (`torch.Tensor`): Input Tensor of shape [N, C, H, W]
         """
         h = self.layers(x)
-        x = self.bn_tr(self.tr_conv(x))
+        x = self.norm(self.tr_conv(x))
         return nn.functional.relu(x + h)

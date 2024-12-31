@@ -21,6 +21,7 @@ class Upsample(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+
 class Decoder(nn.Module):
     def __init__(self, ch, out_channels, num_resblocks,
                  attn_resolutions, in_channels,
@@ -37,6 +38,7 @@ class Decoder(nn.Module):
         # compute in_ch_mult, block_in and curr_res at lowest res
         block_in = ch*ch_mult[self.num_resolutions-1]
         curr_res = resolution // 2**(self.num_resolutions-1)
+
 
         # z to block_in
         self.conv_in = nn.Conv2d(in_channels,
@@ -72,7 +74,8 @@ class Decoder(nn.Module):
             self.up.insert(0, up)  # prepend to get consistent order
 
         # end
-        self.norm_out = nn.BatchNorm2d(block_in)
+        self.norm_out = nn.GroupNorm(num_channels=block_in,
+                                     num_groups=block_in//8)
         self.conv_out = nn.Conv2d(block_in,
                                   out_channels,
                                   kernel_size=3,

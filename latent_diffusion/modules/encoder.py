@@ -64,11 +64,12 @@ class Encoder(nn.Module):
         mid.add_module("mid_attn", AttnBlock(block_in))
         mid.add_module("mid_resblock2", ResBlock(block_in))
         self.layers.add_module("MidBlock", mid)
-        self.layers.add_module("OutNorm", nn.BatchNorm2d(block_out))
+        self.layers.add_module("OutNorm",
+                               nn.GroupNorm(num_channels=block_out,
+                                            num_groups=block_out//32))
         self.layers.add_module(
                 "OutConv",
                 nn.Conv2d(block_out, out_channels, kernel_size=3, padding=1))
-
 
     def forward(self, x: pt.Tensor):
         """

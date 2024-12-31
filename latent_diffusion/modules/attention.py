@@ -14,7 +14,10 @@ class AttnBlock(nn.Module):
         super(AttnBlock, self).__init__()
         self.in_channels = in_channels
         self.qkv = nn.Conv2d(in_channels, 3*in_channels, kernel_size=1)
-        self.norm = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.norm = nn.GroupNorm(num_groups=32,
+                                 num_channels=in_channels,
+                                 eps=1e-6,
+                                 affine=True)
         self.proj_out = nn.Conv2d(
             in_channels=in_channels,
             out_channels=in_channels,

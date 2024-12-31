@@ -16,10 +16,12 @@ encoder:
 
 
 quantizer:
-  use_ema: True
-  codebook_size: 2048
-  embed_dim: 4
-  commit_cost: 0.25
+  type: "gumbel"
+  params:
+    - kld_scale: 5e-4
+    - codebook_size: 2048
+    - embed_dim: 4
+    - tau: 0.25
 
 decoder:
   resolution: 32
