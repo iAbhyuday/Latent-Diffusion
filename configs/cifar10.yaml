@@ -2,9 +2,10 @@ trainer:
   name: "CIFA10"
   train_batch_size: 128
   val_batch_size: 64
-  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
-  lr: 1e-3
+  tensorboard_log_dir: "/content/logs"
+  lr: 2e-4
   device: "cuda:0"
+  load_ckpt: False
   
 encoder:
   resolution: 32
@@ -18,10 +19,10 @@ encoder:
 quantizer:
   type: "gumbel"
   params:
-    - kld_scale: 5e-4
-    - codebook_size: 2048
-    - embed_dim: 4
-    - tau: 0.25
+    kld_scale: 0.05
+    codebook_size: 1024
+    embed_dim: 64
+    tau: 1.0
 
 decoder:
   resolution: 32

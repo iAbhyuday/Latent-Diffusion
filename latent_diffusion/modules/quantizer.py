@@ -142,10 +142,8 @@ class GumbleQuantizer(nn.Module):
         weight_logits = nn.functional.gumbel_softmax(z, tau=self.tau, hard=hard, dim=1)
         logits = einsum("b n h w, n d -> b d h w", weight_logits, self.codebook.weight)
         qy = nn.functional.softmax(logits, dim=1)
-        loss = (
-            self.kld_scale
-            * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
-        )
+        loss = self.kld_scale * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
+        
         return logits, loss, None, weight_logits.argmax(1)
 
 
