@@ -1,0 +1,42 @@
+trainer:
+  name: "CIFA10"
+  train_batch_size: 128
+  val_batch_size: 64
+  tensorboard_log_dir: "/content/logs"
+  lr: 2e-4
+  device: "cuda:0"
+  load_ckpt: False
+  
+encoder:
+  resolution: 32
+  in_channels: 3
+  out_channels: 3
+  num_resblocks: 3
+  ch_factor: 64
+  ch_mult: [1, 2, 4]
+
+
+quantizer:
+  type: "kl"
+  params:
+    in_channels: 3
+    embed_dim: 3
+    beta: 0.5
+    reduce_mean: True
+
+decoder:
+  resolution: 32
+  in_channels: 3
+  out_channels: 3
+  num_resblocks: 3
+  attn_resolutions: []
+  ch: 64
+  ch_mult: [1, 4, 4]
+
+
+perceptual_loss:
+  layers: [1,6,11,20,29]
+  normalized: True
+  scale: 0.01
+  device: "cuda:0"
+

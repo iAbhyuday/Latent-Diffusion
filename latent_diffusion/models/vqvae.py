@@ -4,7 +4,7 @@ from latent_diffusion.modules import Encoder
 from latent_diffusion.modules import Decoder
 from latent_diffusion.modules import build_quantizer
 from latent_diffusion.modules import PerceptualLoss
-
+from latent_diffusion.modules import KLBottleNeck
 
 class VQVAE(nn.Module):
     def __init__(self, config: dict):
@@ -17,8 +17,14 @@ class VQVAE(nn.Module):
                 kernel_size=(1, 1)
                 )
         self.encoder = Encoder(**config["encoder"])
-        self.vq = build_quantizer(config["quantizer"])
-        self.post_quant = nn.Conv2d(
+        if config["quantizer"]["type"] == "kl":
+            self.vq = KLBottleNeck(
+                in_channels=config["encoder"]["out_channels"],
+                out_channels=config["quantizer"]["params"]["embed_dim"]
+            )
+        else:
+            self.vq = build_quantizer(config["quantizer"])
+            self.post_quant = nn.Conv2d(
                 config["quantizer"]["params"]["embed_dim"],
                 config["decoder"]["in_channels"],
                 kernel_size=(1, 1)
