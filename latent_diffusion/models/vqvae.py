@@ -11,11 +11,6 @@ class VQVAE(nn.Module):
         super(VQVAE, self).__init__()
         self.config = config
         
-        self.pre_quant = nn.Conv2d(
-                config["encoder"]["out_channels"],
-                config["quantizer"]["params"]["embed_dim"],
-                kernel_size=(1, 1)
-                )
         self.encoder = Encoder(**config["encoder"])
         if config["quantizer"]["type"] == "kl":
             self.vq = KLBottleNeck(
@@ -23,6 +18,12 @@ class VQVAE(nn.Module):
                 out_channels=config["quantizer"]["params"]["embed_dim"]
             )
         else:
+            self.pre_quant = nn.Conv2d(
+                config["encoder"]["out_channels"],
+                config["quantizer"]["params"]["embed_dim"],
+                kernel_size=(1, 1)
+                )
+            
             self.vq = build_quantizer(config["quantizer"])
             self.post_quant = nn.Conv2d(
                 config["quantizer"]["params"]["embed_dim"],
@@ -34,9 +35,17 @@ class VQVAE(nn.Module):
 
     def forward(self, input_image):
         z = self.encoder(input_image)
-        z = self.pre_quant(z)
-        code, commitment_loss, codebook_loss, encoding = self.vq(z)
-        code = self.post_quant(code)
+        encoding = 0
+        if self.config["quantizer"]["type"] == "kl":
+            code, kl_loss = self.vq(z)
+            commitment_loss = 0
+            codebook_loss = 0
+        else:
+            z = self.pre_quant(z)
+            code, commitment_loss, codebook_loss, encoding = self.vq(z)
+            code = self.post_quant(code)
+            kl_loss = 0
         x_ = self.decoder(code)
         recon_loss = nn.functional.mse_loss(x_, input_image)
-        return x_, code, commitment_loss, codebook_loss, recon_loss, encoding
+        return x_, code, commitment_loss, codebook_loss, kl_loss, recon_loss, \
+            encoding
