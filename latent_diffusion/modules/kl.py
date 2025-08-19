@@ -25,11 +25,11 @@ class KLBottleNeck(nn.Module):
         z = mean + eps * std
 
         # Compute KL divergence per sample
-        kl = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp(), dim=[1, 2, 3])  # shape: [batch_size]
+        kl = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp(), dim=[1, 2, 3])
 
         if self.reduce_mean:
             kl_loss = self.beta * kl.mean()
         else:
-            kl_loss = self.beta * kl  # shape: [batch_size]
+            kl_loss = self.beta * kl
 
         return z, kl_loss
