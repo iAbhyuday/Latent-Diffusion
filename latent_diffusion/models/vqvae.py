@@ -33,10 +33,9 @@ class VQVAE(pl.LightningModule):
                 config["decoder"]["in_channels"],
                 kernel_size=(1, 1)
             )
-
+            self.codebook_size = config["quantizer"]["params"]["codebook_size"]
         self.decoder = Decoder(**config["decoder"])
         self.percept_loss = PerceptualLoss(**config["perceptual_loss"])
-        self.codebook_size = config["quantizer"]["params"]["codebook_size"]
         self.quantizer_type = config["quantizer"]["type"]
 
         if config["trainer"]["load_ckpt"]:
