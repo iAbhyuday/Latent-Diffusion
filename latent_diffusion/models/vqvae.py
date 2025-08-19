@@ -95,5 +95,5 @@ class VQVAE(pl.LightningModule):
         return total_loss
 
     def configure_optimizers(self):
-        optimizer = pt.optim.Adam(self.parameters(), lr=self.config["trainer"].get("lr", 1e-4))
+        optimizer = pt.optim.Adam(self.parameters(), lr=float(self.config["trainer"].get("lr", 1e-4)))
         return optimizer
