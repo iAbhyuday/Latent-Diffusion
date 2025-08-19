@@ -1,14 +1,18 @@
 import torch as pt
 from torch import nn
+import pytorch_lightning as pl
 from latent_diffusion.modules import Encoder
 from latent_diffusion.modules import Decoder
 from latent_diffusion.modules import build_quantizer
 from latent_diffusion.modules import PerceptualLoss
 from latent_diffusion.modules import KLBottleNeck
+from latent_diffusion.utils.metrics import measure_perplexity
 
-class VQVAE(nn.Module):
+
+class VQVAE(pl.LightningModule):
     def __init__(self, config: dict):
-        super(VQVAE, self).__init__()
+        super().__init__()
+        self.save_hyperparameters()
         self.config = config
         
         self.encoder = Encoder(**config["encoder"])
@@ -22,16 +26,23 @@ class VQVAE(nn.Module):
                 config["encoder"]["out_channels"],
                 config["quantizer"]["params"]["embed_dim"],
                 kernel_size=(1, 1)
-                )
-            
+            )
             self.vq = build_quantizer(config["quantizer"])
             self.post_quant = nn.Conv2d(
                 config["quantizer"]["params"]["embed_dim"],
                 config["decoder"]["in_channels"],
                 kernel_size=(1, 1)
-                 )
+            )
 
         self.decoder = Decoder(**config["decoder"])
+        self.percept_loss = PerceptualLoss(**config["perceptual_loss"])
+        self.codebook_size = config["quantizer"]["params"]["codebook_size"]
+        self.quantizer_type = config["quantizer"]["type"]
+
+        if config["trainer"]["load_ckpt"]:
+            checkpoint = pt.load(config["trainer"]["load_ckpt"], weights_only=True)
+            self.load_state_dict(checkpoint["model_state_dict"])
+
 
     def forward(self, input_image):
         z = self.encoder(input_image)
@@ -46,6 +57,44 @@ class VQVAE(nn.Module):
             code = self.post_quant(code)
             kl_loss = 0
         x_ = self.decoder(code)
+        return x_, code, commitment_loss, codebook_loss, kl_loss, encoding
+
+    def training_step(self, batch, batch_idx):
+        input_image = batch
+        x_, _, commitment_loss, codebook_loss, kl_loss, encoding = self(input_image)
         recon_loss = nn.functional.mse_loss(x_, input_image)
-        return x_, code, commitment_loss, codebook_loss, kl_loss, recon_loss, \
-            encoding
+        ploss = self.percept_loss(x_, input_image)
+        total_loss = recon_loss + ploss
+        if self.config["quantizer"]["type"] == "kl":
+            total_loss += kl_loss
+            self.log("kl_loss", kl_loss)
+        else:
+            total_loss += commitment_loss + codebook_loss
+            ppl, _ = measure_perplexity(encoding, self.codebook_size)
+            self.log("perplexity", ppl)
+            self.log("commitment_loss", commitment_loss)
+            self.log("codebook_loss", codebook_loss)
+
+        self.log("train_loss", total_loss)
+        self.log("recon_loss", recon_loss)
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        input_image = batch
+        x_, code, commitment_loss, codebook_loss, kl_loss, _ = self(input_image)
+        recon_loss = nn.functional.mse_loss(x_, input_image)
+        total_loss = recon_loss
+        if self.config["quantizer"]["type"] == "kl":
+            total_loss += kl_loss
+        else:
+            total_loss += commitment_loss + codebook_loss
+        self.log("val_loss", total_loss)
+        self.log("val_recon_loss", recon_loss)
+        self.log("val_commitment_loss", commitment_loss)
+        self.log("val_codebook_loss", codebook_loss)
+        self.log("val_kl_loss", kl_loss)
+        return total_loss
+
+    def configure_optimizers(self):
+        optimizer = pt.optim.Adam(self.parameters(), lr=self.config["trainer"].get("lr", 1e-4))
+        return optimizer
