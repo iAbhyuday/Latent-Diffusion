@@ -14,7 +14,7 @@ from latent_diffusion.utils.metrics import measure_perplexity
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
-with open("configs/cifar10.yaml", encoding="utf-8") as f:
+with open("configs/cifar10-kl.yaml", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 trainer_cfg = cfg["trainer"]
 
