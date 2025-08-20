@@ -42,7 +42,9 @@ data_module = CIFARDataModule(
     train_batch_size=trainer_cfg["train_batch_size"],
     val_batch_size=trainer_cfg["val_batch_size"]
 )
-
+data_module.setup()
+x, y = next(iter(data_module.train_dataloader()))
+print(f"Min: {torch.min(x)}\nMax: {torch.max(x)}")
 logger = TensorBoardLogger(
     save_dir=trainer_cfg["tensorboard_log_dir"],
     name=trainer_cfg["name"]
