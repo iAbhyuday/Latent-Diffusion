@@ -59,7 +59,7 @@ class VQVAE(pl.LightningModule):
         return x_, code, commitment_loss, codebook_loss, kl_loss, encoding
 
     def training_step(self, batch, batch_idx):
-        input_image = batch
+        input_image, _ = batch
         x_, _, commitment_loss, codebook_loss, kl_loss, encoding = self(input_image)
         recon_loss = nn.functional.mse_loss(x_, input_image)
         ploss = self.percept_loss(x_, input_image)
@@ -79,7 +79,7 @@ class VQVAE(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        input_image = batch
+        input_image, _ = batch
         x_, code, commitment_loss, codebook_loss, kl_loss, _ = self(input_image)
         recon_loss = nn.functional.mse_loss(x_, input_image)
         total_loss = recon_loss
