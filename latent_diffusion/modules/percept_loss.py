@@ -63,9 +63,10 @@ class PerceptualLoss(nn.Module):
             target = (target - self.mean) / self.std
         x = input_image
         y = target
+        out = []
         for _, layer in enumerate(self.layers):
             inp = pt.concat((x, y), dim=0)
             inp = layer(inp)
             x, y = inp.chunk(2)
-            loss += mse_loss(x, y)
-        return self.scale*loss
+            out.append(mse_loss(x, y))
+        return self.scale*torch.sum(out)
