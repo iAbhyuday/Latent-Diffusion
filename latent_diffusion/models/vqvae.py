@@ -45,15 +45,15 @@ class VQVAE(pl.LightningModule):
 
     def forward(self, input_image):
         z = self.encoder(input_image)
-        self.log("encoder_max", torch.max(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_min", torch.max(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_mean", torch.mean(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_std", torch.std(z), on_step=True, prog_bar=True, logger=True)
+        self.log("encoder_max", pt.max(z), on_step=True, prog_bar=True, logger=True)
+        self.log("encoder_min", pt.max(z), on_step=True, prog_bar=True, logger=True)
+        self.log("encoder_mean", pt.mean(z), on_step=True, prog_bar=True, logger=True)
+        self.log("encoder_std", pt.std(z), on_step=True, prog_bar=True, logger=True)
 
         encoding = 0
         if self.config["quantizer"]["type"] == "kl":
             code, kl_loss = self.vq(z)
-            self.log("kl code", troch.mean(code), on_step=True, prog_bar=True, logger=True)
+            self.log("kl code", pt.mean(code), on_step=True, prog_bar=True, logger=True)
             commitment_loss = 0
             codebook_loss = 0
         else:
