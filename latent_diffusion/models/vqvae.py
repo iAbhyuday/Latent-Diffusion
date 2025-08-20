@@ -52,7 +52,7 @@ class VQVAE(pl.LightningModule):
 
         encoding = 0
         if self.config["quantizer"]["type"] == "kl":
-            kl_weight = min(1.0, self.current_epoch / 20)
+            kl_weight = min(1.0, self.current_epoch / 50)
             code, kl_loss, mean, std = self.vq(z, kl_weight)
 
             self.log("kl mean", mean, on_step=True, prog_bar=True, logger=True)
@@ -71,7 +71,7 @@ class VQVAE(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         input_image, _ = batch
         x_, _, commitment_loss, codebook_loss, kl_loss, encoding = self(input_image)
-        recon_loss = nn.functional.mse_loss(x_, input_image, reduction="mean")
+        recon_loss = nn.functional.mse_loss(x_, input_image, reduction="sum") / input_image.numel()
         ploss = self.percept_loss(x_, input_image)
         total_loss = recon_loss + ploss
         if self.config["quantizer"]["type"] == "kl":
