@@ -107,7 +107,6 @@ class VQVAE(pl.LightningModule):
                 self.log("val_codebook_loss", codebook_loss, on_epoch=True, prog_bar=True, logger=True)
 
             self.log("val_commitment_loss", commitment_loss,  on_epoch=True, prog_bar=True, logger=True)
-            self.log("val_codebook_loss", codebook_loss,  on_epoch=True, prog_bar=True, logger=True)
 
         self.log("val_loss", total_loss,  on_epoch=True, prog_bar=True, logger=True)
         self.log("val_recon_loss", recon_loss,  on_epoch=True, prog_bar=True, logger=True)
