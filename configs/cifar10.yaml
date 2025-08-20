@@ -17,12 +17,10 @@ encoder:
 
 
 quantizer:
-  type: "gumbel"
-  params:
-    kld_scale: 0.05
-    codebook_size: 1024
-    embed_dim: 64
-    tau: 1.0
+  use_ema: True
+  codebook_size: 2048
+  embed_dim: 3
+  commit_cost: 0.5
 
 decoder:
   resolution: 32
