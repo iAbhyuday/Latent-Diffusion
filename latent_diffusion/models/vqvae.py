@@ -80,10 +80,11 @@ class VQVAE(pl.LightningModule):
             total_loss += commitment_loss
             if codebook_loss:
                 total_loss += codebook_loss
+                self.log("codebook_loss", codebook_loss, on_epoch=True, prog_bar=True, logger=True)
+
             ppl, _ = measure_perplexity(encoding, self.codebook_size)
             self.log("perplexity", ppl, on_epoch=True, logger=True)
             self.log("commitment_loss", commitment_loss, on_epoch=True, prog_bar=True, logger=True)
-            self.log("codebook_loss", codebook_loss, on_epoch=True, prog_bar=True, logger=True)
 
         self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("recon_loss", recon_loss, on_epoch=True, prog_bar=True, logger=True)
@@ -103,6 +104,8 @@ class VQVAE(pl.LightningModule):
             total_loss += commitment_loss
             if codebook_loss:
                 total_loss += codebook_loss
+                self.log("val_codebook_loss", codebook_loss, on_epoch=True, prog_bar=True, logger=True)
+
             self.log("val_commitment_loss", commitment_loss,  on_epoch=True, prog_bar=True, logger=True)
             self.log("val_codebook_loss", codebook_loss,  on_epoch=True, prog_bar=True, logger=True)
 
