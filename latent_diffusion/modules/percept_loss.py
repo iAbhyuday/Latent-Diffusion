@@ -20,7 +20,6 @@ class PerceptualLoss(nn.Module):
             layers: list = [4, 9, 22],
             normalized: bool = True,
             scale: float = 0.1,
-            device: pt.device = pt.device("cuda:0")
     ):
         super(PerceptualLoss, self).__init__()
         self.normalized = normalized
@@ -57,7 +56,7 @@ class PerceptualLoss(nn.Module):
         """
         assert input_image.shape == target.shape
         assert input_image.shape[2] >= 32
-        loss = pt.Tensor([0.]).to(self.device)
+        loss = pt.Tensor([0.])
 
         if not self.normalized:
             # normalize image
