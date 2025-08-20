@@ -17,10 +17,11 @@ encoder:
 
 
 quantizer:
-  use_ema: True
-  codebook_size: 2048
-  embed_dim: 3
-  commit_cost: 0.5
+  type: "ema"
+  params:
+    codebook_size: 2048
+    embed_dim: 3
+    commit_cost: 0.5
 
 decoder:
   resolution: 32
