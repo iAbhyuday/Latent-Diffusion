@@ -18,8 +18,8 @@ with open("configs/cifar10-kl.yaml", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 trainer_cfg = cfg["trainer"]
 
-t_transforms = Compose([Resize(32), ToTensor(), Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
-v_transforms = Compose([Resize(32), ToTensor(), Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
+t_transforms = Compose([Resize(32), ToTensor())
+v_transforms = Compose([Resize(32), ToTensor())
 
 class CIFARDataModule(pl.LightningDataModule):
     def __init__(self, train_batch_size, val_batch_size):
