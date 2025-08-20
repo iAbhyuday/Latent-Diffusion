@@ -24,7 +24,6 @@ class PerceptualLoss(nn.Module):
         super(PerceptualLoss, self).__init__()
         self.normalized = normalized
         self.scale = scale
-        self.device = device
         self.vgg = vgg19(weights=VGG19_Weights)
         self.layers = nn.ModuleList()
         last_layer = 0
