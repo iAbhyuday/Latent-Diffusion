@@ -69,4 +69,4 @@ class PerceptualLoss(nn.Module):
             inp = layer(inp)
             x, y = inp.chunk(2)
             out.append(mse_loss(x, y))
-        return self.scale*p.Tensor(out).sum()
+        return self.scale*pt.Tensor(out).sum()
