@@ -21,7 +21,7 @@ quantizer:
   params:
     in_channels: 32
     embed_dim: 32
-    beta: 0.5
+    beta: 1e-4
     reduce_mean: True
 
 decoder:
@@ -37,6 +37,6 @@ decoder:
 perceptual_loss:
   layers: [1,6,11,20,29]
   normalized: True
-  scale: 0.00
+  scale: 0.0001
   device: "cuda:0"
 
