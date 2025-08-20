@@ -52,7 +52,9 @@ class VQVAE(pl.LightningModule):
 
         encoding = 0
         if self.config["quantizer"]["type"] == "kl":
-            code, kl_loss, mean, std = self.vq(z)
+            kl_weight = min(1.0, self.current_epoch / 20)
+            code, kl_loss, mean, std = self.vq(z, kl_weight)
+
             self.log("kl mean", mean, on_step=True, prog_bar=True, logger=True)
             self.log("kl std", std, on_step=True, prog_bar=True, logger=True)
 

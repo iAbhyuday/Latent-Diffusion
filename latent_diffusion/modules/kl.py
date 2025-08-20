@@ -16,7 +16,7 @@ class KLBottleNeck(nn.Module):
         self.beta = beta
         self.reduce_mean = reduce_mean
 
-    def forward(self, x):
+    def forward(self, x, weight):
         mean = self.mean(x)
         logvar = self.logvar(x)
 
@@ -28,8 +28,8 @@ class KLBottleNeck(nn.Module):
         kl = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp(), dim=[1, 2, 3])
 
         if self.reduce_mean:
-            kl_loss = self.beta * kl.mean()
+            kl_loss = weight * kl.mean()
         else:
-            kl_loss = self.beta * kl
+            kl_loss = weight * kl
 
         return z, kl_loss, mean.mean(), std.mean()
