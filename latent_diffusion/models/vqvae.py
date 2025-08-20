@@ -7,6 +7,7 @@ from latent_diffusion.modules import build_quantizer
 from latent_diffusion.modules import PerceptualLoss
 from latent_diffusion.modules import KLBottleNeck
 from latent_diffusion.utils.metrics import measure_perplexity
+from torchmetrics.regression import MinkowskiDistance
 
 
 class VQVAE(pl.LightningModule):
@@ -21,19 +22,20 @@ class VQVAE(pl.LightningModule):
                 in_channels=config["encoder"]["out_channels"],
                 out_channels=config["quantizer"]["params"]["embed_dim"]
             )
+            self.beta = float(config["quantizer"]["params"]["beta"])
         else:
-            self.pre_quant = nn.Conv2d(
+            self.vq = build_quantizer(config["quantizer"])
+            self.codebook_size = config["quantizer"]["params"]["codebook_size"]
+        self.pre_quant = nn.Conv2d(
                 config["encoder"]["out_channels"],
                 config["quantizer"]["params"]["embed_dim"],
                 kernel_size=(1, 1)
-            )
-            self.vq = build_quantizer(config["quantizer"])
-            self.post_quant = nn.Conv2d(
+          )
+        self.post_quant = nn.Conv2d(
                 config["quantizer"]["params"]["embed_dim"],
                 config["decoder"]["in_channels"],
                 kernel_size=(1, 1)
-            )
-            self.codebook_size = config["quantizer"]["params"]["codebook_size"]
+        )
         self.decoder = Decoder(**config["decoder"])
         self.percept_loss = PerceptualLoss(**config["perceptual_loss"])
         self.quantizer_type = config["quantizer"]["type"]
@@ -45,16 +47,11 @@ class VQVAE(pl.LightningModule):
 
     def forward(self, input_image):
         z = self.encoder(input_image)
-        self.log("encoder_max", pt.max(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_min", pt.min(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_mean", pt.mean(z), on_step=True, prog_bar=True, logger=True)
-        self.log("encoder_std", pt.std(z), on_step=True, prog_bar=True, logger=True)
-
+        z = self.pre_quant(z)
         encoding = 0
         if self.config["quantizer"]["type"] == "kl":
-            kl_weight = min(1.0, self.current_epoch / 50)
-            code, kl_loss, mean, std = self.vq(z, kl_weight)
-
+            code, kl_loss, mean, std = self.vq(z)
+            code = self.post_quant(code)
             self.log("kl mean", mean, on_step=True, prog_bar=True, logger=True)
             self.log("kl std", std, on_step=True, prog_bar=True, logger=True)
 
@@ -71,11 +68,13 @@ class VQVAE(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         input_image, _ = batch
         x_, _, commitment_loss, codebook_loss, kl_loss, encoding = self(input_image)
-        recon_loss = nn.functional.mse_loss(x_, input_image, reduction="sum") / input_image.numel()
+        # recon_loss = nn.functional.mse_loss(x_, input_image, reduction="sum") / input_image.numel()
+        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean()
         ploss = self.percept_loss(x_, input_image)
         total_loss = recon_loss + ploss
         if self.config["quantizer"]["type"] == "kl":
-            total_loss += kl_loss
+            kl_loss = pt.sum(kl_loss) / kl_loss.shape[0]
+            total_loss = total_loss + self.beta * kl_loss
             self.log("kl_loss", kl_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         else:
             total_loss += commitment_loss + codebook_loss
@@ -91,17 +90,20 @@ class VQVAE(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         input_image, _ = batch
         x_, code, commitment_loss, codebook_loss, kl_loss, _ = self(input_image)
-        recon_loss = nn.functional.mse_loss(x_, input_image)
+        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean()
         total_loss = recon_loss
         if self.config["quantizer"]["type"] == "kl":
-            total_loss += kl_loss
+            kl_loss = pt.sum(kl_loss) / kl_loss.shape[0]
+            total_loss = total_loss + self.beta * kl_loss
+            self.log("val_kl_loss", kl_loss,  on_epoch=True, prog_bar=True, logger=True)
+
         else:
             total_loss += commitment_loss + codebook_loss
+            self.log("val_commitment_loss", commitment_loss,  on_epoch=True, prog_bar=True, logger=True)
+            self.log("val_codebook_loss", codebook_loss,  on_epoch=True, prog_bar=True, logger=True)
+
         self.log("val_loss", total_loss,  on_epoch=True, prog_bar=True, logger=True)
         self.log("val_recon_loss", recon_loss,  on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_commitment_loss", commitment_loss,  on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_codebook_loss", codebook_loss,  on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_kl_loss", kl_loss,  on_epoch=True, prog_bar=True, logger=True)
         return total_loss
 
     def configure_optimizers(self):
