@@ -10,7 +10,7 @@ trainer:
 encoder:
   resolution: 32
   in_channels: 3
-  out_channels: 3
+  out_channels: 32
   num_resblocks: 3
   ch_factor: 64
   ch_mult: [1, 2, 4]
@@ -19,14 +19,14 @@ encoder:
 quantizer:
   type: "kl"
   params:
-    in_channels: 3
-    embed_dim: 3
+    in_channels: 32
+    embed_dim: 32
     beta: 0.5
     reduce_mean: True
 
 decoder:
   resolution: 32
-  in_channels: 3
+  in_channels: 32
   out_channels: 3
   num_resblocks: 3
   attn_resolutions: []
