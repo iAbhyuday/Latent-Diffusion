@@ -32,4 +32,4 @@ class KLBottleNeck(nn.Module):
         else:
             kl_loss = self.beta * kl
 
-        return z, kl_loss, mean, std
+        return z, kl_loss, mean.mean(), std.mean()
