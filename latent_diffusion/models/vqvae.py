@@ -114,4 +114,17 @@ class VQVAE(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = pt.optim.Adam(self.parameters(), lr=float(self.config["trainer"].get("lr", 1e-4)))
-        return optimizer
+        steps_per_epoch = self.trainer.datamodule.train_dataloader().__len__()
+        scheduler = pt.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs * steps_per_epoch,
+            eta_min=self.config["trainer"].get("min_lr", 1e-6)
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1
+            }
+        }
