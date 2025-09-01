@@ -66,7 +66,7 @@ class ResBlock(nn.Module):
             nn.GroupNorm(num_channels=out_channels,
                          num_groups=out_channels//8,
                          affine=True),
-            nn.ReLU(inplace=True),
+            nn.SiLU(inplace=True),
             nn.Conv2d(
                 out_channels, out_channels, kernel_size=3,
                 padding="same", bias=False),
@@ -87,4 +87,4 @@ class ResBlock(nn.Module):
         """
         h = self.layers(x)
         x = self.norm(self.tr_conv(x))
-        return nn.functional.relu(x + h)
+        return nn.functional.silu(x + h)

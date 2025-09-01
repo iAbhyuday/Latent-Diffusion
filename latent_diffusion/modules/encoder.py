@@ -2,7 +2,7 @@ import torch as pt
 from torch import nn
 from .resblock import ResBlock
 from .attention import AttnBlock
-
+from .attention import LinearAttention as LinAttn
 
 class Encoder(nn.Module):
     """
@@ -51,7 +51,7 @@ class Encoder(nn.Module):
                 block_in = block_out
             down_block.add_module(f"resblock_{i}", block)
             if current_resolution in self.attn_resolution:
-                down_block.add_module(f"attnblock_{i}", AttnBlock(block_out))
+                down_block.add_module(f"attnblock_{i}", LinAttn(block_out))
 
             if i != len(self.ch_mult)-1:
                 down_block.add_module(
@@ -61,7 +61,7 @@ class Encoder(nn.Module):
 
         mid = nn.ModuleDict()
         mid.add_module("mid_resblock1", ResBlock(block_in))
-        mid.add_module("mid_attn", AttnBlock(block_in))
+        mid.add_module("mid_attn", LinAttn(block_in))
         mid.add_module("mid_resblock2", ResBlock(block_in))
         self.layers.add_module("MidBlock", mid)
         self.layers.add_module("OutNorm",
@@ -103,6 +103,6 @@ class Encoder(nn.Module):
         _, h = self.layers["MidBlock"]["mid_attn"](h)
         h = self.layers["MidBlock"]["mid_resblock2"](h)
         h = self.layers["OutNorm"](h)
-        h = nn.functional.relu(h)
+        h = nn.functional.silu(h)
         h = self.layers["OutConv"](h)
         return h

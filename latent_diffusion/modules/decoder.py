@@ -2,7 +2,7 @@ import torch as pt
 from torch import nn
 from .resblock import ResBlock
 from .attention import AttnBlock
-
+from .attention import LinearAttention as LinAttn
 
 class Upsample(nn.Module):
 
@@ -50,7 +50,7 @@ class Decoder(nn.Module):
         # middle
         self.mid = nn.Module()
         self.mid.block_1 = ResBlock(in_channels=block_in)
-        self.mid.attn_1 = AttnBlock(block_in)
+        self.mid.attn_1 = LinAttn(block_in)
         self.mid.block_2 = ResBlock(in_channels=block_in)
 
         # upsampling
@@ -64,7 +64,7 @@ class Decoder(nn.Module):
                                       out_channels=block_out))
                 block_in = block_out
                 if curr_res in attn_resolutions:
-                    attn.append(AttnBlock(block_in))
+                    attn.append(LinAttn(block_in))
             up = nn.Module()
             up.block = block
             up.attn = attn
@@ -102,7 +102,7 @@ class Decoder(nn.Module):
                 h = self.up[i_level].upsample(h)
 
         h = self.norm_out(h)
-        h = nn.functional.relu(h)
+        h = nn.functional.silu(h)
         h = self.conv_out(h)
 
         return h

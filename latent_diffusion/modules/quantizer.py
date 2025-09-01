@@ -1,6 +1,7 @@
 import torch
 from torch import nn, einsum
 from torch.nn.functional import one_hot
+import torch.nn.functional as F
 
 
 class VectorQuantizer(nn.Module):
@@ -21,10 +22,8 @@ class VectorQuantizer(nn.Module):
         super(VectorQuantizer, self).__init__()
         self.embed_dim = embed_dim
         self.codebook_size = codebook_size
-        self.codebook = nn.Parameter(
-            torch.zeros(codebook_size, embed_dim), requires_grad=True
-        )
-        self.codebook.data.uniform_(-1.0 / self.embed_dim, 1.0 / self.embed_dim)
+        self.codebook = nn.Embedding(codebook_size, embed_dim)
+        self.codebook.weight.data.uniform_(-1.0 / codebook_size, 1.0 / codebook_size)
         self.commit_cost = commit_cost
 
     def forward(self, z: torch.Tensor):
@@ -40,21 +39,22 @@ class VectorQuantizer(nn.Module):
                 codebook_indices
         """
         b, c, h, w = z.shape
-        # (N, 1, d)
-        flat_z = z.view(-1, 1, self.embed_dim)
+        z = z.permute(0, 2, 3, 1).contiguous()
+        # (N, d)
+        flat_z = z.view(-1, self.embed_dim)
         # (N, n)
         dist = (
-            (flat_z**2).sum(2)
-            + (self.codebook.data**2).sum(1)
-            - 2 * (flat_z.squeeze(1) @ self.codebook.data.T)
+            (flat_z**2).sum(1)
+            + (self.codebook.weight**2).sum(1)
+            - 2 * (flat_z @ self.codebook.weight.T)
         )
-        # dist = torch.norm(flat_z - self.codebook, dim=2)
         # (N, )
-        encoding = torch.argmin(dist, dim=1)
+        encoding = torch.argmin(dist, dim=1).unsqueeze(1)
         # (N, n)
-        idx = one_hot(encoding, num_classes=self.codebook_size).float()
+        idx = torch.zeros(encoding.shape[0], self.codebook_size, device=z.device)
+        idx.scatter_(1, encoding, 1)
         #  (N, n) * (n, d) -> (N, d)
-        code = idx @ self.codebook.data
+        code = idx @ self.codebook.weight
         # (b, c, h, w)
         code = code.view(z.shape)
         codebook_loss = nn.MSELoss()(code, z.detach())
@@ -62,67 +62,87 @@ class VectorQuantizer(nn.Module):
         # straight-through estimator (dc/dz)
         code = z + (code - z).detach()
 
-        return code, commitment_loss, codebook_loss, idx
+        e_mean = torch.mean(idx, dim=0)
+        perplexity = torch.exp(-torch.sum(e_mean * torch.log(e_mean + 1e-10)))
+        code = code.permute(0, 3, 1, 2).contiguous()
+        return code, commitment_loss, codebook_loss,  perplexity
 
 
 class EMAQuantizer(nn.Module):
-
     def __init__(
         self,
         codebook_size: int = 512,
         embed_dim: int = 256,
         commit_cost: float = 0.25,
+        decay: float = 0.99,
+        eps: float = 1e-5,
     ):
         super(EMAQuantizer, self).__init__()
         self.embed_dim = embed_dim
         self.codebook_size = codebook_size
         self.commit_cost = commit_cost
+
         self.register_buffer(
-            "codebook", torch.FloatTensor(torch.randn((codebook_size, embed_dim)))
+            "codebook", torch.randn(codebook_size, embed_dim)
         )
-        self.register_buffer("n_i", torch.zeros((codebook_size,)))
-        self.register_buffer("e_i", self.get_buffer("codebook").data.clone())
-        self.register_buffer("decay", torch.tensor(0.99))
-        self.register_buffer("eps", torch.tensor(1e-5))
+        self.register_buffer("n_i", torch.zeros(codebook_size))
+        self.register_buffer("e_i", self.codebook.clone())
+        self.decay = decay
+        self.eps = eps
+
+        nn.init.uniform_(
+            self.codebook.data, 
+            -1.0 / self.codebook_size, 
+            1.0 / self.codebook_size
+        )
 
     def forward(self, z):
         b, c, h, w = z.shape
-        # (N, 1, d)
-        flat_z = z.view(-1, 1, self.embed_dim)
-        # (N, n)
+        flat_z = z.view(-1, self.embed_dim)   # (N, d)
+
+        # Compute distances
         dist = (
-            (flat_z**2).sum(2)
-            + (self.codebook.data**2).sum(1)
-            - 2 * (flat_z.squeeze(1) @ self.codebook.data.T)
+            flat_z.pow(2).sum(1, keepdim=True)
+            + self.codebook.pow(2).sum(1)
+            - 2 * flat_z @ self.codebook.T
         )
-        # (N, )
+
+        # Encoding indices
         encoding = torch.argmin(dist, dim=1)
-        # (N, n)
-        idx = one_hot(encoding, num_classes=self.codebook_size).float()
-        #  (N, n) * (n, d) -> (N, d)
-        code = idx @ self.codebook.data
-        # (b, c, h, w)
+        idx = F.one_hot(encoding, num_classes=self.codebook_size).type(flat_z.dtype)
+
+        # Quantized output
+        code = idx @ self.codebook
         code = code.view(z.shape)
 
         if self.training:
             with torch.no_grad():
-                # (n, N) * (N, d) -> (n, d)
-                code_update = idx.T @ flat_z.squeeze(1)
-                # (n, )
-                n_i = self.decay * self.get_buffer("n_i") + (1 - self.decay) * idx.sum(
-                    0
+                # EMA cluster sizes
+                encodings_sum = idx.sum(0)  # (n,)
+                self.n_i.mul_(self.decay).add_(encodings_sum, alpha=1 - self.decay)
+
+                # EMA embedding sum
+                embed_sum = idx.T @ flat_z  # (n, d)
+                self.e_i.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
+
+                # Laplace smoothing
+                n = self.n_i.sum()
+                smoothed_cluster_size = (
+                    (self.n_i + self.eps) 
+                    / (n + self.codebook_size * self.eps) * n
                 )
-                #  stable n (Laplace smoothing)
-                self.n_i = (n_i + self.eps) / (b + self.codebook_size * self.eps) * b
-                # (n, d)
-                self.e_i = self.decay * self.e_i + (1 - self.decay) * code_update
-                # update codebook
-                self.codebook.data = self.e_i / self.n_i.unsqueeze(1)
-        commitment_loss = self.commit_cost * nn.MSELoss()(z, code.detach())
-        # straight-through estimator (dc/dz)
+                embed_normalized = self.e_i / smoothed_cluster_size.unsqueeze(1)
+                self.codebook.data.copy_(embed_normalized)
+
+        commitment_loss = self.commit_cost * F.mse_loss(z, code.detach())
+
         code = z + (code - z).detach()
 
-        return code, commitment_loss, None, idx
+
+        avg_probs = idx.mean(0)
+        perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
+
+        return code, commitment_loss, None, perplexity
 
 
 class GumbleQuantizer(nn.Module):
@@ -139,12 +159,13 @@ class GumbleQuantizer(nn.Module):
     def forward(self, z):
         logits = self.proj(z)
         hard = False if self.training else True
-        soft_logits = nn.functional.gumbel_softmax(logits, tau=self.tau, hard=hard, dim=1)
+        soft_logits = F.gumbel_softmax(logits, tau=self.tau, hard=hard, dim=1)
         code = einsum("b n h w, n d -> b d h w", soft_logits, self.codebook.weight)
         qy = nn.functional.softmax(logits, dim=1)
         loss = self.kld_scale * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
         
         return code, loss, None, soft_logits.argmax(1)
+
 
 
 def build_quantizer(config):

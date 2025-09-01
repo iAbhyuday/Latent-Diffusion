@@ -1,0 +1,44 @@
+trainer:
+  name: "Coco17-16x16x8-lr-sched"
+  train_batch_size: 32
+  val_batch_size: 32
+  max_epochs: 25
+  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  lr: 0.0001
+  device: "cuda"
+  warmup: True
+  warmup_steps: 0.1
+  load_ckpt: False
+  checkpoint_dir: "/mnt/sda/ab/projects/FY24/cmc/Latent-Diffusion/models/"
+  
+encoder:
+  resolution: 128
+  in_channels: 3
+  out_channels: 8
+  num_resblocks: 3
+  ch_factor: 64
+  ch_mult: [1, 2, 2, 4]
+  attn_resolutions: []
+
+quantizer:
+  type: "ema"
+  params:
+    codebook_size: 4096
+    embed_dim: 8
+    commit_cost: 0.25
+
+decoder:
+  resolution: 128
+  in_channels: 8
+  out_channels: 3
+  num_resblocks: 3
+  attn_resolutions: []
+  ch: 64
+  ch_mult: [1, 2, 2, 4]
+
+
+perceptual_loss:
+  layers: [1, 6, 11, 20, 29]
+  normalized: True
+  scale: 0.01
+

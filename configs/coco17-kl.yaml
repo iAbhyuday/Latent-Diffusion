@@ -1,0 +1,45 @@
+trainer:
+  name: "Coco17-16x16x8-kl"
+  train_batch_size: 16
+  val_batch_size: 16
+  max_epochs: 20
+  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  lr: 4.5e-5
+  device: "cuda"
+  warmup: True
+  warmup_steps: 0.05
+  load_ckpt: False
+  checkpoint_dir: "/mnt/sda/ab/projects/FY24/cmc/Latent-Diffusion/models/"
+  
+encoder:
+  resolution: 256
+  in_channels: 3
+  out_channels: 128
+  num_resblocks: 3
+  ch_factor: 64
+  ch_mult: [1, 2, 4, 4]
+  attn_resolutions: [16]
+
+quantizer:
+  type: "kl"
+  params:
+    in_channels: 64
+    embed_dim: 8
+    beta: 1e-6
+    reduce_mean: True
+
+decoder:
+  resolution: 256
+  in_channels: 8
+  out_channels: 3
+  num_resblocks: 3
+  attn_resolutions: [16]
+  ch: 64
+  ch_mult: [1, 2, 4, 4]
+
+
+perceptual_loss:
+  layers: [1, 6, 11, 20, 29]
+  normalized: True
+  scale: 0.1
+

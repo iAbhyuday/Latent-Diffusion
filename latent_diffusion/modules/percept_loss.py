@@ -19,7 +19,7 @@ class PerceptualLoss(nn.Module):
             self,
             layers: list = [4, 9, 22],
             normalized: bool = True,
-            scale: float = 0.1,
+            scale: float = 0.001,
     ):
         super(PerceptualLoss, self).__init__()
         self.normalized = normalized
@@ -55,18 +55,18 @@ class PerceptualLoss(nn.Module):
         """
         assert input_image.shape == target.shape
         assert input_image.shape[2] >= 32
-        loss = pt.Tensor([0.])
+        loss = pt.tensor(0.0, device=input_image.device, requires_grad=True)
 
-        if not self.normalized:
-            # normalize image
-            input_image = (input_image - self.mean) / self.std
-            target = (target - self.mean) / self.std
+
+        input_image = (input_image - self.mean) / self.std
+        target = (target - self.mean) / self.std
+        
         x = input_image
         y = target
-        out = []
         for _, layer in enumerate(self.layers):
-            inp = pt.concat((x, y), dim=0)
-            inp = layer(inp)
+            with pt.no_grad():
+                inp = pt.concat((x, y), dim=0)
+                inp = layer(inp)
             x, y = inp.chunk(2)
-            out.append(mse_loss(x, y))
-        return self.scale*pt.Tensor(out).sum()
+            loss = loss + mse_loss(x, y)
+        return self.scale * loss

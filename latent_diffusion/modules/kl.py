@@ -17,9 +17,11 @@ class KLBottleNeck(nn.Module):
         mean, logvar = self.conv(x).chunk(2, 1)
         logvar = torch.clamp(logvar, -30.0, 20.0)
         std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        z = mean + eps * std
-
+        z = self.sample(mean, std)
         # Compute KL divergence per sample
         kl = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp(), dim=[1, 2, 3])
         return z, kl, mean.mean(), std.mean()
+    
+    def sample(self, mean, std):
+        x = mean + std * torch.randn(mean.shape, device=mean.device)
+        return x
