@@ -1,0 +1,40 @@
+trainer:
+  name: "Coco17-8x8-lr-sched"
+  train_batch_size: 64
+  val_batch_size: 64
+  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  lr: 3e-4
+  device: "cuda"
+  load_ckpt: False
+  
+encoder:
+  resolution: 128
+  in_channels: 3
+  out_channels: 3
+  num_resblocks: 3
+  ch_factor: 64
+  ch_mult: [1, 2, 2, 4]
+  attn_resolutions: []
+
+quantizer:
+  type: "ema"
+  params:
+    codebook_size: 4096
+    embed_dim: 3
+    commit_cost: 0.25
+
+decoder:
+  resolution: 128
+  in_channels: 3
+  out_channels: 3
+  num_resblocks: 2
+  attn_resolutions: []
+  ch: 64
+  ch_mult: [1, 2, 2, 4]
+
+
+perceptual_loss:
+  layers: [1, 6, 11, 20, 29]
+  normalized: True
+  scale: 0.001
+

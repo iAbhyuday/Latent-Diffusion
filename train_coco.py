@@ -75,32 +75,91 @@ class CocoDataModule(pl.LightningDataModule):
                 transform=v_transforms,
             )
 
-    def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.train_batch_size, shuffle=True, num_workers=4, drop_last=True, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True)
+train_data = DataLoader(train_data, batch_size=trainer_cfg["train_batch_size"], shuffle=True, num_workers=16, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True)
+val_data = DataLoader(val_data, batch_size=trainer_cfg["val_batch_size"], shuffle=False, num_workers=4, collate_fn=collate_fn)
 
-    def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.val_batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True,drop_last=True)
-
-
-
-data_module = CocoDataModule(
-    train_batch_size=trainer_cfg["train_batch_size"],
-    val_batch_size=trainer_cfg["val_batch_size"]
-)
+x, y = next(iter(train_data))
 #%%
-logger = TensorBoardLogger(
-    save_dir=trainer_cfg["tensorboard_log_dir"],
-    name=trainer_cfg["name"]
-)
+model = VQVAE(cfg).to(trainer_cfg["device"])
+percept_loss = PerceptualLoss(**cfg["perceptual_loss"]).to(trainer_cfg["device"])
+optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+#%%
+if cfg["trainer"]["load_ckpt"]:
+    checkpoint = torch.load(cfg["trainer"]["load_ckpt"], weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optim.load_state_dict(checkpoint['optimizer_state_dict'])
 
-class ImageReconstructionCallback(pl.callbacks.Callback):
-    def __init__(self, num_images=8):
-        super().__init__()
-        self.num_images = num_images
+#%%
+lr = float(trainer_cfg["lr"])
+n_epochs = 20
+num_batches = len(train_data)
+sched = ReduceLROnPlateau(optim, mode="min", min_lr=1e-7, threshold=1e-4, factor=0.5, patience=5)
+# %%
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        images, _ = batch
-        images = images[:self.num_images]
+
+best=10
+for e in range(0, n_epochs):
+    r_recon = 0.0
+    r_com = 0.0
+    r_cdl = 0.0
+    r_pl = 0.0
+    r_ppl = 0.0
+
+    with tqdm(train_data, unit="batch", desc=f"Epoch {e+1}", position=0, leave=True) as data:
+        model.train()
+        for batch_idx, (x,_) in enumerate(data):
+            writer.add_scalar("lr", optim.param_groups[0]["lr"], e*num_batches + batch_idx)
+            x = x.to(device)
+
+            x_, cd, cl, cdl, rl, enc = model(x)
+            pl = percept_loss(x_, x)
+            loss = cl + rl + pl
+            
+            r_recon += rl.item()
+            r_com += cl.item()
+            r_pl += pl.item()
+            ppl, clp = measure_perplexity(enc, cfg["quantizer"]["codebook_size"])
+            r_ppl += ppl.item()
+            if not cfg["quantizer"]["use_ema"]:
+                loss += cdl
+                r_cdl += cdl.item()
+
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+            
+            
+            data.set_postfix(
+                {
+                    "recon_loss": r_recon / (batch_idx+1),
+                    "commit_loss": r_com / (batch_idx+1),
+                    "codebook_loss": r_cdl / (batch_idx+1),
+                    "percept_loss": r_pl / (batch_idx+1),
+                    "perplexity": r_ppl/ (batch_idx+1)
+                }
+            )
+        
+        writer.add_scalar("recon_loss", r_recon / num_batches, e)
+        writer.add_scalar("commit_loss", r_com / num_batches, e)
+        writer.add_scalar("codebook_loss", r_cdl / num_batches, e)
+        writer.add_scalar("perceptual_loss", r_pl / num_batches, e)
+        writer.add_scalar("perplexity", r_ppl / num_batches, e)
+    
+    rec_loss = (r_recon + r_pl)/num_batches
+    sched.step(r_recon/num_batches)
+    if rec_loss < best:
+        best = rec_loss
+        checkpoint = {
+            "epoch": e,
+            "lr": optim.param_groups[0]["lr"],
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optim.state_dict(),
+            }
+
+        torch.save(checkpoint, f"{trainer_cfg['name']}_best.pth")
+
+
+    if e % 1 == 0:
         with torch.no_grad():
             reconstructions = pl_module(images.to(pl_module.device))
         # If model returns tuple (recon, ...), take first
@@ -117,29 +176,12 @@ class ImageReconstructionCallback(pl.callbacks.Callback):
         )
 
 
-# sched = ReduceLROnPlateau(optim, mode="min", min_lr=1e-7, threshold=1e-4, factor=0.5, patience=5)
+# %%
+checkpoint = {
+    "epoch": n_epochs,
+    "model_state_dict": model.state_dict(),
+    "optimizer_state_dict": optim.state_dict(),
+}
 
-trainer = pl.Trainer(
-    max_epochs=trainer_cfg["max_epochs"],
-    logger=logger,
-    gradient_clip_val=1.0,
-    gradient_clip_algorithm="norm",
-    accelerator=trainer_cfg["device"],
-    log_every_n_steps=10,
-    accumulate_grad_batches=2,
-    callbacks=[
-        ImageReconstructionCallback(num_images=16),
-        ModelCheckpoint(
-            dirpath=trainer_cfg["checkpoint_dir"],
-            monitor="val_recon_loss",
-            mode="min",
-            save_top_k=1,
-            filename="vq-best-{epoch:02d}-{val_recon_loss_epoch:.3f}",
-            save_last=True,
-        )
-    ],
-
-)
-
-model = VQVAE.load_from_checkpoint(cfg["trainer"]["load_ckpt"], strict=False,) if cfg["trainer"]["load_ckpt"] else VQVAE(cfg)
-trainer.fit(model, datamodule=data_module)
+torch.save(checkpoint, f"{trainer_cfg['name']}_e{n_epochs}.pth")
+writer.close()
