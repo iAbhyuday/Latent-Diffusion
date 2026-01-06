@@ -8,7 +8,7 @@ from tqdm import tqdm
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import Normalize, Resize, ToTensor, Compose, Lambda
+from torchvision.transforms import Normalize, Resize, ToTensor, Compose, Lambda,RandomHorizontalFlip
 from torchvision.datasets import CocoCaptions
 from latent_diffusion.models import VAE
 from latent_diffusion.modules import PerceptualLoss
@@ -29,7 +29,7 @@ writer = SummaryWriter(
     log_dir=os.path.join(trainer_cfg["tensorboard_log_dir"], trainer_cfg["name"])
     )
 wandb_logger = WandbLogger(
-    project=trainer_cfg["name"],
+    project=f"{trainer_cfg['name']}-LPIPS",
     name="silu-16x16x8-coco",
     log_model=False
 )
@@ -39,7 +39,7 @@ device = torch.device(trainer_cfg["device"])
 resolution = cfg["encoder"]["resolution"]
 #%%
 resolution = cfg["encoder"]["resolution"]
-t_transforms = Compose([Resize((resolution, resolution)), ToTensor(), Lambda(lambda x: x * 2 - 1)])
+t_transforms = Compose([Resize((resolution, resolution)), RandomHorizontalFlip(0.5), ToTensor(), Lambda(lambda x: x * 2 - 1)])
 v_transforms = Compose([Resize((resolution, resolution)), ToTensor(), Lambda(lambda x: x * 2 - 1)])
 
 def collate_fn(data):
@@ -115,12 +115,13 @@ class EMACallback(Callback):
         
         with torch.no_grad():
             for name, param in pl_module.named_parameters():
-                if not param.requires_grad:
-                    continue
-                if name not in self.ema_state:
-                    self.ema_state[name] = param.detach().clone()
-                else:
-                    self.ema_state[name].mul_(self.decay).add_(param.detach(), alpha=1 - self.decay)
+                if "encoder" in name or "decoder" in name:
+                    if not param.requires_grad:
+                        continue
+                    if name not in self.ema_state:
+                        self.ema_state[name] = param.detach().clone()
+                    else:
+                        self.ema_state[name].mul_(self.decay).add_(param.detach(), alpha=1 - self.decay)
 
     def on_validation_start(self, trainer, pl_module):
         # Swap to EMA weights for validation
@@ -186,13 +187,12 @@ trainer = pl.Trainer(
     accelerator=trainer_cfg["device"],
     log_every_n_steps=10,
     precision="16-mixed",
-    accumulate_grad_batches=4,
     callbacks=[
         EMACallback(),
         ImageReconstructionCallback(num_images=16),
         ModelCheckpoint(
             dirpath=trainer_cfg["checkpoint_dir"],
-            monitor="val_recon_loss",
+            monitor="fid",
             mode="min",
             save_top_k=1,
             filename="best-{epoch:02d}-kl",

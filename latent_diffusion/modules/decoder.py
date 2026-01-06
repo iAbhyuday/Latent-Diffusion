@@ -2,7 +2,7 @@ import torch as pt
 from torch import nn
 from .resblock import ResBlock
 from .attention import AttnBlock
-from .attention import LinearAttention as LinAttn
+# from .attention import LinearAttention as AttnBlock
 
 class Upsample(nn.Module):
 
@@ -15,12 +15,12 @@ class Upsample(nn.Module):
         self.scale = scale_factor
 
         self.layers = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.UpsamplingNearest2d(scale_factor=self.scale),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, stride=1),
+            
         )
     def forward(self, x):
         return self.layers(x)
-
 
 class Decoder(nn.Module):
     def __init__(self, ch, out_channels, num_resblocks,
@@ -50,7 +50,7 @@ class Decoder(nn.Module):
         # middle
         self.mid = nn.Module()
         self.mid.block_1 = ResBlock(in_channels=block_in)
-        self.mid.attn_1 = LinAttn(block_in)
+        self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResBlock(in_channels=block_in)
 
         # upsampling
@@ -64,7 +64,7 @@ class Decoder(nn.Module):
                                       out_channels=block_out))
                 block_in = block_out
                 if curr_res in attn_resolutions:
-                    attn.append(LinAttn(block_in))
+                    attn.append(AttnBlock(block_in))
             up = nn.Module()
             up.block = block
             up.attn = attn
@@ -100,9 +100,7 @@ class Decoder(nn.Module):
                     _, h = self.up[i_level].attn[i_block](h)
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
-
         h = self.norm_out(h)
         h = nn.functional.silu(h)
         h = self.conv_out(h)
-
         return h
