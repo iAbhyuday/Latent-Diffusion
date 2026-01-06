@@ -6,6 +6,23 @@ trainer:
   lr: 2e-4
   device: "auto"
   load_ckpt: False
+  checkpoint_dir: "./models/"
+  min_lr: 1e-7
+  disc_lr: 2e-4
+  warmup: False
+  warmup_steps: 0.1
+
+  # Discriminator config
+  disc_start: 3000
+  disc_weight: 0.5
+  adversarial_weight: 0.1
+  use_adaptive_weight: False
+  grad_acc_steps: 1
+  
+  # Optimizer config
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
+  d_weight_max: 50.0
   
 encoder:
   resolution: 32
@@ -39,4 +56,9 @@ perceptual_loss:
   normalized: True
   scale: 0.0001
   device: "cuda:0"
+
+disc_config:
+  input_nc: 3
+  ndf: 64
+  n_layers: 3
 
