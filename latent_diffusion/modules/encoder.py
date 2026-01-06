@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 from .resblock import ResBlock
 from .attention import AttnBlock
@@ -71,7 +71,7 @@ class Encoder(nn.Module):
                 "OutConv",
                 nn.Conv2d(block_out, out_channels, kernel_size=3, padding=1))
 
-    def forward(self, x: pt.Tensor):
+    def forward(self, x: torch.Tensor):
         """
         The [`Encoder`] forward method
         Args:

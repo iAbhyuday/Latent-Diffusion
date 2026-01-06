@@ -3,13 +3,23 @@ trainer:
   train_batch_size: 32
   val_batch_size: 32
   max_epochs: 25
-  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  tensorboard_log_dir: "./logs"
+  checkpoint_dir: "./models/"
   lr: 0.0001
+  min_lr: 1e-7
   device: "cuda"
   warmup: True
   warmup_steps: 0.1
   load_ckpt: False
-  checkpoint_dir: "/mnt/sda/ab/projects/FY24/cmc/Latent-Diffusion/models/"
+  # Optimizer config
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
+
+data:
+  train_root: "./data/coco17/train2017"
+  train_ann: "./data/coco17/annotations/captions_train2017.json"
+  val_root: "./data/coco17/val2017"
+  val_ann: "./data/coco17/annotations/captions_val2017.json"
   
 encoder:
   resolution: 128

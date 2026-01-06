@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 from .resblock import ResBlock
 from .attention import AttnBlock

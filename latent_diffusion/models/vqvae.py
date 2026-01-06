@@ -1,15 +1,23 @@
-import torch as pt
+import torch
 from torch import nn
 import pytorch_lightning as pl
 from latent_diffusion.modules import Encoder
 from latent_diffusion.modules import Decoder
 from latent_diffusion.modules import build_quantizer
 from latent_diffusion.modules import PerceptualLoss
-from latent_diffusion.modules import KLBottleNeck
-from latent_diffusion.utils.metrics import measure_perplexity
 
 
 class VQVAE(pl.LightningModule):
+    """
+    Vector Quantized Variational Autoencoder (VQ-VAE) implementation.
+    
+    This model encodes images to a discrete latent space using vector quantization,
+    enabling high-quality image reconstruction and generation.
+    
+    Args:
+        config: Configuration dictionary containing encoder, decoder, quantizer,
+                and training parameters.
+    """
     def __init__(self, config: dict):
         super().__init__()
         self.save_hyperparameters()
@@ -17,7 +25,10 @@ class VQVAE(pl.LightningModule):
         
         self.encoder = Encoder(**config["encoder"])
         self.vq = build_quantizer(config["quantizer"])
-        self.codebook_size = config["quantizer"]["params"]["codebook_size"]
+        # Get codebook_size from config or from the quantizer itself
+        self.codebook_size = config["quantizer"]["params"].get(
+            "codebook_size", getattr(self.vq, "codebook_size", 512)
+        )
         self.pre_quant = nn.Conv2d(
                 config["encoder"]["out_channels"],
                 config["quantizer"]["params"]["embed_dim"],
@@ -44,7 +55,7 @@ class VQVAE(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         input_image, _ = batch
         x_, _, commitment_loss, codebook_loss, perplexity = self(input_image)
-        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean()
+        recon_loss = torch.abs(input_image.contiguous() - x_.contiguous()).mean()
         ploss = self.perceptual_loss(x_, input_image)
         if not codebook_loss:
             total_loss = recon_loss + ploss + commitment_loss
@@ -54,7 +65,7 @@ class VQVAE(pl.LightningModule):
         lr = optimizer.param_groups[0]["lr"]
         self.log("lr", lr, on_step=True, prog_bar=True, on_epoch=False)
         self.log("ploss", ploss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
-        self.log("commit loss", commitment_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("commit_loss", commitment_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         if codebook_loss:
             self.log("codebook_loss", codebook_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("ppl", perplexity, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -65,7 +76,7 @@ class VQVAE(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         input_image, _ = batch
         x_, _, commitment_loss, codebook_loss, _ = self(input_image)
-        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean()
+        recon_loss = torch.abs(input_image.contiguous() - x_.contiguous()).mean()
         ploss = self.perceptual_loss(x_, input_image)
 
         if codebook_loss:
@@ -73,13 +84,29 @@ class VQVAE(pl.LightningModule):
         else:
             total_loss = recon_loss + ploss + commitment_loss
         self.log("val_ploss", ploss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_commit loss", commitment_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_commit_loss", commitment_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_recon_loss", recon_loss,  on_epoch=True, prog_bar=True, logger=True)
         self.log("val_loss", total_loss,  on_epoch=True, prog_bar=True, logger=True)
         return total_loss
 
+    def configure_gradient_clipping(
+        self, optimizer, gradient_clip_val, gradient_clip_algorithm
+    ):
+        """Configure gradient clipping for training stability."""
+        clip_val = self.config["trainer"].get("gradient_clip_val", 1.0)
+        self.clip_gradients(
+            optimizer,
+            gradient_clip_val=clip_val,
+            gradient_clip_algorithm="norm"
+        )
+
     def configure_optimizers(self):
-        optimizer = pt.optim.AdamW(self.parameters(), lr=self.config["trainer"]["lr"], weight_decay=1e-2)
+        weight_decay = self.config["trainer"].get("weight_decay", 1e-2)
+        optimizer = torch.optim.AdamW(
+            self.parameters(), 
+            lr=self.config["trainer"]["lr"], 
+            weight_decay=weight_decay
+        )
         steps_per_epoch = len(self.trainer.datamodule.train_dataloader())
         if self.config["trainer"].get("warmup", False):
             warmup_steps = self.config["trainer"].get("warmup_steps", 0.1)
@@ -87,17 +114,17 @@ class VQVAE(pl.LightningModule):
             self.warmup_steps = int(warmup_steps * self.warmup_steps) 
             print(f"warmup_steps : {self.warmup_steps}")
 
-            warmup_scheduler = pt.optim.lr_scheduler.LambdaLR(
+            warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
                 optimizer, 
                 lr_lambda=lambda step: min((step + 1) / self.warmup_steps, 1.0)
             )
-            main_scheduler = pt.optim.lr_scheduler.CosineAnnealingLR(
+            main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=(self.trainer.max_epochs * steps_per_epoch) // self.trainer.accumulate_grad_batches - self.warmup_steps,
                 eta_min=self.config["trainer"].get("min_lr", 1e-7),
             )
 
-            scheduler = pt.optim.lr_scheduler.SequentialLR(
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
                 optimizer, 
                 schedulers=[warmup_scheduler, main_scheduler], 
                 milestones=[self.warmup_steps]
@@ -110,7 +137,7 @@ class VQVAE(pl.LightningModule):
                     "frequency": 1
                 },}
         else:
-            scheduler = pt.optim.lr_scheduler.CosineAnnealingLR(
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=(self.trainer.max_epochs * steps_per_epoch) // self.trainer.accumulate_grad_batches,
                 eta_min=self.config["trainer"].get("min_lr", 1e-7),

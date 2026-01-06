@@ -3,14 +3,32 @@ trainer:
   train_batch_size: 32
   val_batch_size: 32
   max_epochs: 70
-  tensorboard_log_dir: "/mnt/sda/ab/projects/FY24/cmc/logs"
+  tensorboard_log_dir: "./logs"
   lr: 4.5e-6
+  disc_lr: 2e-6
+  min_lr: 1e-7
   device: "cuda"
   warmup: False
   warmup_steps: 0.05
   load_ckpt: False
-  checkpoint_dir: "/media/z004e29c/mlinux/abhyuday/projects/Latent-Diffusion/models/"
-  
+  checkpoint_dir: "./models/"
+  # Discriminator config
+  disc_start: 10000  # Steps before enabling discriminator (warm-up)
+  disc_weight: 0.5   # Weight for adaptive discriminator balancing
+  adversarial_weight: 0.1  # Fixed adversarial loss weight (if not adaptive)
+  use_adaptive_weight: False  # Set True to use gradient-based adaptive weighting
+  grad_acc_steps: 2  # Gradient accumulation steps
+  # Optimizer config
+  weight_decay: 0.01  # AdamW weight decay
+  gradient_clip_val: 1.0  # Max gradient norm for clipping
+  d_weight_max: 50.0  # Max value for adaptive discriminator weight
+
+data:
+  train_root: "./data/coco17/train2017"
+  train_ann: "./data/coco17/annotations/captions_train2017.json"
+  val_root: "./data/coco17/val2017"
+  val_ann: "./data/coco17/annotations/captions_val2017.json"
+
 encoder:
   resolution: 128
   in_channels: 3
@@ -40,8 +58,7 @@ decoder:
 disc_config:
   input_nc: 3
   ndf: 64
-  n_layers: 
-  lr: 
+  n_layers: 3
 
 
 perceptual_loss:

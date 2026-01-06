@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 from torch.nn.functional import softmax
 from einops import rearrange

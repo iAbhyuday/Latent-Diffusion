@@ -1,46 +1,70 @@
-#%%
+"""
+Training script for VAE (KL) on COCO-17 dataset.
+Uses PyTorch Lightning with WandB logging.
+
+Usage:
+    python train.py --config configs/coco17-kl.yaml
+"""
 import os
+import argparse
 import yaml
 import torch
 import wandb
-import numpy as np
-from tqdm import tqdm
-from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import Normalize, Resize, ToTensor, Compose, Lambda,RandomHorizontalFlip
+from torchvision.transforms import Resize, ToTensor, Compose, Lambda, RandomHorizontalFlip
 from torchvision.datasets import CocoCaptions
 from latent_diffusion.models import VAE
-from latent_diffusion.modules import PerceptualLoss
-from latent_diffusion.utils.metrics import measure_perplexity
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
-import setproctitle
-from pytorch_lightning.loggers import WandbLogger
-#%%
-print("IMPORT COMPLETE")
-with open("configs/coco17-kl.yaml", encoding="utf-8") as f:
+from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Train VAE on COCO-17 dataset",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--config", "-c",
+        type=str,
+        default="configs/coco17-kl.yaml",
+        help="Path to the configuration YAML file",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint to resume training from",
+    )
+    parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="Disable WandB logging (use TensorBoard instead)",
+    )
+    return parser.parse_args()
+
+args = parse_args()
+
+print(f"Loading config from: {args.config}")
+with open(args.config, encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 trainer_cfg = cfg["trainer"]
 
-#%%%
-writer = SummaryWriter(
-    log_dir=os.path.join(trainer_cfg["tensorboard_log_dir"], trainer_cfg["name"])
-    )
-wandb_logger = WandbLogger(
-    project=f"{trainer_cfg['name']}-LPIPS",
-    name="silu-16x16x8-coco",
-    log_model=False
-)
-
-torch.set_printoptions(precision=3, sci_mode=False)
-device = torch.device(trainer_cfg["device"])
+# Transforms (set up based on resolution from config)
 resolution = cfg["encoder"]["resolution"]
-#%%
-resolution = cfg["encoder"]["resolution"]
-t_transforms = Compose([Resize((resolution, resolution)), RandomHorizontalFlip(0.5), ToTensor(), Lambda(lambda x: x * 2 - 1)])
-v_transforms = Compose([Resize((resolution, resolution)), ToTensor(), Lambda(lambda x: x * 2 - 1)])
+t_transforms = Compose([
+    Resize((resolution, resolution)),
+    RandomHorizontalFlip(0.5),
+    ToTensor(),
+    Lambda(lambda x: x * 2 - 1)
+])
+v_transforms = Compose([
+    Resize((resolution, resolution)),
+    ToTensor(),
+    Lambda(lambda x: x * 2 - 1)
+])
 
 def collate_fn(data):
     """Creates mini-batch tensors from the list of tuples (image, caption).
@@ -65,20 +89,24 @@ def collate_fn(data):
 
 
 class CocoDataModule(pl.LightningDataModule):
-    def __init__(self, train_batch_size, val_batch_size):
+    def __init__(self, train_batch_size, val_batch_size, train_root, train_ann, val_root, val_ann):
         super().__init__()
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
+        self.train_root = train_root
+        self.train_ann = train_ann
+        self.val_root = val_root
+        self.val_ann = val_ann
 
     def setup(self, stage=None):
         self.train_data = CocoCaptions(
-                root="/media/z004e29c/mlinux/coco17/train2017",
-                annFile="/media/z004e29c/mlinux/coco17/annotations/captions_train2017.json",
+                root=self.train_root,
+                annFile=self.train_ann,
                 transform=t_transforms,
             )
         self.val_data = CocoCaptions(
-                root="/media/z004e29c/mlinux/coco17/val2017",
-                annFile="/media/z004e29c/mlinux/coco17/annotations/captions_val2017.json",
+                root=self.val_root,
+                annFile=self.val_ann,
                 transform=v_transforms,
             )
 
@@ -89,10 +117,15 @@ class CocoDataModule(pl.LightningDataModule):
         return DataLoader(self.val_data, batch_size=self.val_batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True,drop_last=True)
 
 
-
+# Get data paths from config (with fallback defaults)
+data_cfg = cfg.get("data", {})
 data_module = CocoDataModule(
     train_batch_size=trainer_cfg["train_batch_size"],
-    val_batch_size=trainer_cfg["val_batch_size"]
+    val_batch_size=trainer_cfg["val_batch_size"],
+    train_root=data_cfg.get("train_root", "./data/coco17/train2017"),
+    train_ann=data_cfg.get("train_ann", "./data/coco17/annotations/captions_train2017.json"),
+    val_root=data_cfg.get("val_root", "./data/coco17/val2017"),
+    val_ann=data_cfg.get("val_ann", "./data/coco17/annotations/captions_val2017.json"),
 )
 #%%
 logger = TensorBoardLogger(
@@ -139,11 +172,6 @@ class EMACallback(Callback):
         self.backup = {}
 
 
-
-import pytorch_lightning as pl
-import torch
-import wandb
-
 class ImageReconstructionCallback(pl.callbacks.Callback):
     def __init__(self, num_images=8):
         super().__init__()
@@ -180,26 +208,53 @@ class ImageReconstructionCallback(pl.callbacks.Callback):
             })
 
 
-
-trainer = pl.Trainer(
-    max_epochs=trainer_cfg["max_epochs"],
-    logger=wandb_logger,
-    accelerator=trainer_cfg["device"],
-    log_every_n_steps=10,
-    precision="16-mixed",
-    callbacks=[
-        EMACallback(),
-        ImageReconstructionCallback(num_images=16),
-        ModelCheckpoint(
-            dirpath=trainer_cfg["checkpoint_dir"],
-            monitor="fid",
-            mode="min",
-            save_top_k=1,
-            filename="best-{epoch:02d}-kl",
-            save_last=True,
+def main():
+    """Main training function."""
+    print(f"Loading config from: {args.config}")
+    
+    # Setup logger
+    if args.no_wandb:
+        logger = TensorBoardLogger(
+            save_dir=trainer_cfg.get("tensorboard_log_dir", "./logs"),
+            name=trainer_cfg["name"],
         )
-    ],
+    else:
+        logger = WandbLogger(
+            project=f"{trainer_cfg['name']}-LPIPS",
+            name=trainer_cfg["name"],
+            log_model=False
+        )
+    
+    trainer = pl.Trainer(
+        max_epochs=trainer_cfg["max_epochs"],
+        logger=logger,
+        accelerator=trainer_cfg.get("device", "auto"),
+        log_every_n_steps=10,
+        precision="16-mixed",
+        callbacks=[
+            EMACallback(),
+            ImageReconstructionCallback(num_images=16),
+            ModelCheckpoint(
+                dirpath=trainer_cfg.get("checkpoint_dir", "./models"),
+                monitor="fid",
+                mode="min",
+                save_top_k=1,
+                filename="best-{epoch:02d}-kl",
+                save_last=True,
+            )
+        ],
+    )
+    
+    # Load or create model
+    ckpt_path = args.resume or (trainer_cfg.get("load_ckpt") if trainer_cfg.get("load_ckpt") else None)
+    if ckpt_path:
+        model = VAE.load_from_checkpoint(ckpt_path, config=cfg, strict=False)
+        print(f"Loaded checkpoint from: {ckpt_path}")
+    else:
+        model = VAE(cfg)
+    
+    trainer.fit(model, datamodule=data_module, ckpt_path=ckpt_path)
 
-)
-model = VAE.load_from_checkpoint(cfg["trainer"]["load_ckpt"], strict=False) if cfg["trainer"]["load_ckpt"] else VAE(cfg)
-trainer.fit(model, datamodule=data_module)
+
+if __name__ == "__main__":
+    main()

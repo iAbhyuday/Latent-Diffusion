@@ -1,12 +1,19 @@
 trainer:
-  name: "CIFA10"
+  name: "CIFAR10"
   train_batch_size: 128
   val_batch_size: 64
-  tensorboard_log_dir: "/content/logs"
+  max_epochs: 100
+  tensorboard_log_dir: "./logs"
+  checkpoint_dir: "./models/"
   lr: 2e-4
+  min_lr: 1e-7
   device: "auto"
+  warmup: False
+  warmup_steps: 0.1
   load_ckpt: False
-  
+  # Optimizer config
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
 encoder:
   resolution: 32
   in_channels: 3

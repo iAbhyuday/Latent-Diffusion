@@ -69,6 +69,19 @@ class VectorQuantizer(nn.Module):
 
 
 class EMAQuantizer(nn.Module):
+    """
+    Exponential Moving Average Vector Quantizer.
+    
+    Uses EMA to update codebook embeddings instead of gradient descent,
+    which often leads to better codebook utilization.
+    
+    Parameters:
+        codebook_size (int): Number of codebook vectors.
+        embed_dim (int): Dimension of codebook vectors.
+        commit_cost (float): Commitment loss weight (beta).
+        decay (float): EMA decay rate for codebook updates.
+        eps (float): Small constant for numerical stability.
+    """
     def __init__(
         self,
         codebook_size: int = 512,
@@ -145,10 +158,28 @@ class EMAQuantizer(nn.Module):
         return code, commitment_loss, None, perplexity
 
 
-class GumbleQuantizer(nn.Module):
+class GumbelQuantizer(nn.Module):
+    """
+    Gumbel-Softmax Vector Quantizer.
+    
+    Uses the Gumbel-Softmax trick for differentiable discrete sampling,
+    allowing end-to-end training without straight-through estimator.
+    
+    Parameters:
+        codebook_size (int): Number of codebook vectors.
+        embed_dim (int): Dimension of codebook vectors.
+        tau (float): Temperature for Gumbel-Softmax (lower = harder).
+        kld_scale (float): Scale factor for KL divergence regularization.
+    """
 
-    def __init__(self, codebook_size=512, embed_dim=32, tau=1, kld_scale=5e-4):
-        super(GumbleQuantizer, self).__init__()
+    def __init__(
+        self,
+        codebook_size: int = 512,
+        embed_dim: int = 32,
+        tau: float = 1.0,
+        kld_scale: float = 5e-4,
+    ):
+        super(GumbelQuantizer, self).__init__()
         self.codebook_size = codebook_size
         self.embed_dim = embed_dim
         self.tau = tau
@@ -168,10 +199,20 @@ class GumbleQuantizer(nn.Module):
 
 
 
-def build_quantizer(config):
+def build_quantizer(config: dict) -> nn.Module:
+    """
+    Factory function to build a quantizer from config.
+    
+    Args:
+        config: Dictionary with 'type' and 'params' keys.
+                'type' can be 'ema', 'gumbel', or 'vanilla'.
+    
+    Returns:
+        A quantizer module instance.
+    """
     if config["type"] == "ema":
         return EMAQuantizer(**config["params"])
     elif config["type"] == "gumbel":
-        return GumbleQuantizer(**config["params"])
+        return GumbelQuantizer(**config["params"])
     else:
         return VectorQuantizer(**config["params"])

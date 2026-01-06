@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 from latent_diffusion.utils import init_weights
 

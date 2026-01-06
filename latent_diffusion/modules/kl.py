@@ -2,16 +2,20 @@ import torch
 from torch import nn
 
 class KLBottleNeck(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        """
-        Args:
-            in_channels (int): Number of input channels.
-            out_channels (int): Number of output channels.
-            beta (float): Scaling factor for KL divergence (for beta-VAE).
-            reduce_mean (bool): If True, return mean KL loss over batch; else return per-sample KLs.
-        """
+    """
+    KL Divergence Bottleneck for Variational Autoencoders.
+    
+    Projects input to mean and log-variance, then samples using the 
+    reparameterization trick. Returns the sampled latent, KL divergence,
+    and summary statistics.
+    
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels (latent dimension).
+    """
+    def __init__(self, in_channels: int, out_channels: int):
         super(KLBottleNeck, self).__init__()
-        self.conv = nn.Conv2d(in_channels, 2*out_channels, kernel_size=1)
+        self.conv = nn.Conv2d(in_channels, 2 * out_channels, kernel_size=1)
 
     def forward(self, x):
         mean, logvar = self.conv(x).chunk(2, 1)

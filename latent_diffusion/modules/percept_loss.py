@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 from torch.nn.functional import mse_loss
 from torchvision.models import vgg19, VGG19_Weights

@@ -1,4 +1,4 @@
-import torch as pt
+import torch
 from torch import nn
 import lpips
 import torch.nn.functional as F
@@ -8,13 +8,19 @@ from latent_diffusion.modules import Decoder
 from latent_diffusion.modules import KLBottleNeck
 from latent_diffusion.modules import NLayerDiscriminator
 from torchmetrics.image.fid import FrechetInceptionDistance
-from latent_diffusion.losses.loss import *
-perceptual_loss = lpips.LPIPS(net='vgg').to(pt.device("cuda" if pt.cuda.is_available() else "cpu"))
-# fid = FrechetInceptionDistance(feature=2048).to(pt.device("cuda" if pt.cuda.is_available() else "cpu"))
+from latent_diffusion.losses.loss import gan_loss_hinge_dis
+
 
 class FIDMetric:
-    def __init__(self, dim=2048):
-        self.fid = FrechetInceptionDistance(feature=dim).to(pt.device("cuda" if pt.cuda.is_available() else "cpu"))
+    """
+    Wrapper for FID (Fréchet Inception Distance) metric computation.
+    
+    Handles proper preprocessing of images for FID calculation.
+    """
+    def __init__(self, dim: int = 2048):
+        self.fid = FrechetInceptionDistance(feature=dim).to(
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
     
     def measure(self, x, y):
         
@@ -27,8 +33,8 @@ class FIDMetric:
             y = F.interpolate(y, size=(299, 299), mode="bilinear", align_corners=False)
 
         # Convert to uint8 [0,255]
-        x = (x * 255).to(pt.uint8)
-        y = (y * 255).to(pt.uint8)
+        x = (x * 255).to(torch.uint8)
+        y = (y * 255).to(torch.uint8)
         # Update FID
         self.fid.update(x, real=True)
         self.fid.update(y, real=False)
@@ -38,26 +44,49 @@ class FIDMetric:
         self.fid.reset()
         return fid_score
 
-FID = FIDMetric()
+
 class VAE(pl.LightningModule):
+    """
+    Variational Autoencoder with KL regularization and GAN-based discriminator.
+    
+    This model uses a KL bottleneck for continuous latent space regularization
+    and includes a PatchGAN discriminator for adversarial training.
+    
+    Args:
+        config: Configuration dictionary containing encoder, decoder, quantizer,
+                discriminator, and training parameters.
+    """
     def __init__(self, config: dict):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
         self.automatic_optimization = False
-        self.disc_start = 0
+        
+        # Training configuration with sensible defaults
+        self.disc_start = config["trainer"].get("disc_start", 10000)  # Warm-up before discriminator
         self.grad_acc_steps = config["trainer"].get("grad_acc_steps", 2)
         self.disc_weight = config["trainer"].get("disc_weight", 0.5)
+        self.adversarial_weight = config["trainer"].get("adversarial_weight", 0.1)
+        self.use_adaptive_weight = config["trainer"].get("use_adaptive_weight", False)
+        self.gradient_clip_val = config["trainer"].get("gradient_clip_val", 1.0)
+        self.weight_decay = config["trainer"].get("weight_decay", 1e-2)
+        self.d_weight_max = config["trainer"].get("d_weight_max", 50.0)
+        
+        # Encoder
         self.encoder = Encoder(**config["encoder"])
         self.pre_quant = nn.Conv2d(
                 config["encoder"]["out_channels"],
                 2 * config["quantizer"]["params"]["in_channels"],
                 kernel_size=(1, 1)
           )
+        
+        # KL Bottleneck
         self.kl = KLBottleNeck(
                 2 * config["quantizer"]["params"]["in_channels"],
                 out_channels=config["quantizer"]["params"]["embed_dim"]
-        )        
+        )
+        
+        # Decoder
         self.post_quant = nn.Conv2d(
                 config["quantizer"]["params"]["embed_dim"],
                 config["decoder"]["in_channels"],
@@ -65,11 +94,33 @@ class VAE(pl.LightningModule):
         )
         self.decoder = Decoder(**config["decoder"])
 
+        # Loss weights
         self.beta = float(config["quantizer"]["params"]["beta"])
         self.p_weight = self.config["perceptual_loss"]["scale"]
+        
+        # Discriminator
         self.discriminator = NLayerDiscriminator(**config["disc_config"])
         
-        self.logvar = nn.Parameter(pt.ones(size=()) * 0.)
+        # Learnable log-variance for uncertainty weighting
+        self.logvar = nn.Parameter(torch.ones(size=()) * 0.)
+
+        # Perceptual loss (will be moved to correct device in on_fit_start)
+        self.perceptual_loss_fn = lpips.LPIPS(net='vgg')
+        for param in self.perceptual_loss_fn.parameters():
+            param.requires_grad = False  # Freeze LPIPS weights
+        
+        # FID metric (initialized lazily to use correct device)
+        self._fid_metric = None
+
+    @property
+    def fid_metric(self):
+        """Lazy initialization of FID metric to ensure correct device."""
+        if self._fid_metric is None:
+            self._fid_metric = FIDMetric()
+            # Move to same device as model
+            if hasattr(self, 'device'):
+                self._fid_metric.fid = self._fid_metric.fid.to(self.device)
+        return self._fid_metric
 
     def encode(self, x):
         z = self.encoder(x)
@@ -85,7 +136,7 @@ class VAE(pl.LightningModule):
     def forward(self, input_image):
         z, kl, mean, std = self.encode(input_image)
         x_ = self.decode(z)
-        kl_loss = (pt.sum(kl) / kl.shape[0])
+        kl_loss = (torch.sum(kl) / kl.shape[0])
         return x_, z, kl_loss, mean, std
 
     def training_step(self, batch, batch_idx):
@@ -93,26 +144,36 @@ class VAE(pl.LightningModule):
         g_opt, d_opt = self.optimizers()
         g_sched, d_sched = self.lr_schedulers()
         x_, _, kl_loss, mean, std = self(input_image)
-        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean(dim=[1,2,3])
-        ploss = self.p_weight * perceptual_loss(input_image.contiguous(), x_.contiguous()).squeeze()
+        recon_loss = torch.abs(input_image.contiguous() - x_.contiguous()).mean(dim=[1,2,3])
+        ploss = self.p_weight * self.perceptual_loss_fn(input_image.contiguous(), x_.contiguous()).squeeze()
         nll_loss = recon_loss + ploss
-        nll_loss = nll_loss / pt.exp(self.logvar) + self.logvar
+        nll_loss = nll_loss / torch.exp(self.logvar) + self.logvar
         w_nll = nll_loss.mean()
-        nll_loss = pt.sum(nll_loss) / nll_loss.shape[0] 
+        nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
         
         total_loss = w_nll + self.beta * kl_loss
-        # Vae Update
+        
+        # Discriminator adversarial loss (only after warm-up)
         if self.trainer.global_step > self.disc_start:
             dis_fake = self.discriminator(x_.contiguous())
-            g_loss = -pt.mean(dis_fake)
-            #d_weight = self.calculate_adaptive_weight(nll_loss, g_loss, self.get_last_layer())
-            total_loss = total_loss + 0.2 * g_loss
-            self.log("g_loss", g_loss.detach(), on_step=True, on_epoch=True, prog_bar=True)   
-            #self.log("d_w", d_weight, on_step=True, on_epoch=False, logger=True)     
+            g_loss = -torch.mean(dis_fake)
+            
+            # Use adaptive or fixed weighting for adversarial loss
+            if self.use_adaptive_weight:
+                d_weight = self.calculate_adaptive_weight(w_nll, g_loss, self.get_last_layer())
+                self.log("d_weight", d_weight, on_step=True, on_epoch=False, logger=True)
+            else:
+                d_weight = self.adversarial_weight
+            
+            total_loss = total_loss + d_weight * g_loss
+            self.log("g_loss", g_loss.detach(), on_step=True, on_epoch=True, prog_bar=True)     
         self.manual_backward(total_loss)
         if (batch_idx + 1) % self.grad_acc_steps == 0:
+            # Gradient clipping for training stability
+            torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), max_norm=self.gradient_clip_val)
+            torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), max_norm=self.gradient_clip_val)
             g_opt.step()
-            #g_sched.step()
+            g_sched.step()  # Step LR scheduler (required for manual optimization)
             g_opt.zero_grad()
 
         # Discriminator Update
@@ -121,9 +182,10 @@ class VAE(pl.LightningModule):
             dis_fake = self.discriminator(x_.contiguous().detach())
             d_loss = gan_loss_hinge_dis(dis_fake, dis_real)
             self.manual_backward(d_loss)
-            if (batch_idx + 1) % self.grad_acc_steps ==0:
-                # pt.nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=1.0)
+            if (batch_idx + 1) % self.grad_acc_steps == 0:
+                torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=self.gradient_clip_val)
                 d_opt.step()
+                d_sched.step()  # Step discriminator LR scheduler
                 d_opt.zero_grad()
                 self.log("d_loss", d_loss.detach(), prog_bar=True, on_epoch=True, on_step=True)
 
@@ -142,91 +204,71 @@ class VAE(pl.LightningModule):
         input_image, _ = batch
         x_, _, kl_loss, _, _= self(input_image)
         
-        recon_loss = pt.abs(input_image.contiguous() - x_.contiguous()).mean(dim=[1,2,3])
-        ploss = self.p_weight * perceptual_loss(input_image.contiguous(), x_.contiguous()).squeeze()
-        nll_loss = recon_loss + self.p_weight * ploss
-        nll_loss = nll_loss / pt.exp(self.logvar) + self.logvar
-        nll_loss = pt.sum(nll_loss) / nll_loss.shape[0] 
+        recon_loss = torch.abs(input_image.contiguous() - x_.contiguous()).mean(dim=[1,2,3])
+        ploss = self.p_weight * self.perceptual_loss_fn(input_image.contiguous(), x_.contiguous()).squeeze()
+        nll_loss = recon_loss + ploss
+        nll_loss = nll_loss / torch.exp(self.logvar) + self.logvar
+        nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
         total_loss = nll_loss + self.beta * kl_loss
-        FID.measure(input_image, x_)
+        self.fid_metric.measure(input_image, x_)
         self.log("val_recon_loss", nll_loss, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return total_loss
     
     def on_validation_epoch_end(self):
-        fid_score = FID.compute()
+        fid_score = self.fid_metric.compute()
         self.log("fid", fid_score, on_epoch=True, prog_bar=True, logger=True)
     def get_last_layer(self):
         return self.decoder.conv_out.weight
     def calculate_adaptive_weight(self, nll_loss, g_loss, last_layer=None):
         if last_layer is not None:
-            nll_grads = pt.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
-            g_grads = pt.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
+            nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
+            g_grads = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
         else:
-            nll_grads = pt.autograd.grad(nll_loss, self.last_layer[0], retain_graph=True)[0]
-            g_grads = pt.autograd.grad(g_loss, self.last_layer[0], retain_graph=True)[0]
+            nll_grads = torch.autograd.grad(nll_loss, self.last_layer[0], retain_graph=True)[0]
+            g_grads = torch.autograd.grad(g_loss, self.last_layer[0], retain_graph=True)[0]
 
-        d_weight = pt.norm(nll_grads) / (pt.norm(g_grads) + 1e-4)
-        self.log("nll_grad", pt.norm(nll_grads).detach(), on_step=True, on_epoch=False, logger=True)
-        self.log("g_grad", pt.norm(g_grads).detach(), on_step=True, on_epoch=False, logger=True)
-        d_weight = pt.clamp(d_weight, 0.0, 50).detach()
+        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + 1e-4)
+        self.log("nll_grad", torch.norm(nll_grads).detach(), on_step=True, on_epoch=False, logger=True)
+        self.log("g_grad", torch.norm(g_grads).detach(), on_step=True, on_epoch=False, logger=True)
+        d_weight = torch.clamp(d_weight, 0.0, self.d_weight_max).detach()
         d_weight = d_weight * self.disc_weight
         return d_weight
     def configure_optimizers(self):
-        g_optimizer = pt.optim.Adam(
+        """Configure optimizers and learning rate schedulers for generator and discriminator."""
+        g_optimizer = torch.optim.Adam(
             list(self.encoder.parameters())+
             list(self.pre_quant.parameters())+
             list(self.kl.parameters())+
             list(self.post_quant.parameters())+
-            list(self.decoder.parameters()),
-            lr=6e-6,
-            weight_decay=1e-2)
-        d_optimizer = pt.optim.Adam(self.discriminator.parameters(), lr=2e-6, weight_decay=1e-2)
+            list(self.decoder.parameters())+
+            [self.logvar],  # Include learnable log-variance for uncertainty weighting
+            lr=self.config["trainer"].get("lr", 6e-6),
+            weight_decay=self.weight_decay)
+        d_optimizer = torch.optim.Adam(
+            self.discriminator.parameters(), 
+            lr=self.config["trainer"].get("disc_lr", 2e-6), 
+            weight_decay=self.weight_decay
+        )
         steps_per_epoch = len(self.trainer.datamodule.train_dataloader())
         max_steps = (self.trainer.max_epochs * steps_per_epoch) // self.grad_acc_steps
-        d_sched = pt.optim.lr_scheduler.CosineAnnealingLR(
+        
+        d_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
             d_optimizer,
             T_max=max_steps,
             eta_min=self.config["trainer"].get("min_lr", 4.5e-6),
-            )
-        if False:
-            self.warmup_steps = (steps_per_epoch * self.trainer.max_epochs ) // self.grad_acc_steps
-            self.warmup_steps = int(self.config["trainer"]["warmup_steps"] * self.warmup_steps) 
-            print(f"warmup_steps : {self.warmup_steps}")
-
-            warmup_scheduler = pt.optim.lr_scheduler.LambdaLR(
-                g_optimizer, 
-                lr_lambda=lambda step: min(max((step + 1) / self.warmup_steps, 1e-1), 1.0)
-            )
-            total_cosine_steps = max_steps - self.warmup_steps
-            main_scheduler =  pt.optim.lr_scheduler.CosineAnnealingLR(
-                g_optimizer,
-                T_max=total_cosine_steps,
-                eta_min=self.config["trainer"].get("min_lr", 1e-7),
-            )
-
-            scheduler = pt.optim.lr_scheduler.SequentialLR(
-                g_optimizer, 
-                schedulers=[warmup_scheduler, main_scheduler], 
-                milestones=[self.warmup_steps]
-            )
-            return (
-                [g_optimizer, d_optimizer], 
-                [
-                    {"scheduler": scheduler, "interval": "step"}, 
-                    {"scheduler": d_sched, "interval": "step"}
-                ]
-            )
-        else:
-            scheduler = pt.optim.lr_scheduler.CosineAnnealingLR(
-                g_optimizer,
-                T_max=max_steps,
-                eta_min=self.config["trainer"].get("min_lr", 1e-6),
-            )
-            return (
-                [g_optimizer, d_optimizer], 
-                [
-                    {"scheduler": scheduler, "interval": "step"}, 
-                    {"scheduler": d_sched, "interval": "step"}
-                ]
-            )
+        )
+        
+        g_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            g_optimizer,
+            T_max=max_steps,
+            eta_min=self.config["trainer"].get("min_lr", 1e-6),
+        )
+        
+        return (
+            [g_optimizer, d_optimizer], 
+            [
+                {"scheduler": g_sched, "interval": "step"}, 
+                {"scheduler": d_sched, "interval": "step"}
+            ]
+        )
