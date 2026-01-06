@@ -1,0 +1,11 @@
+torch>=2.0.0
+torchvision
+pytorch-lightning
+wandb
+tensorboard
+lpips
+einops
+pyyaml
+tqdm
+torch-fidelity
+scipy

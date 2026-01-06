@@ -1,8 +1,7 @@
 __pycache__/
 wandb/
-data/
+/data/
 *.py[cod]
 *.pth
 *.jpg
-data/
-nbs/
+/nbs/

@@ -39,8 +39,8 @@ class PerceptualLoss(nn.Module):
 
     def forward(
             self,
-            input_image: pt.Tensor,
-            target: pt.Tensor
+            input_image: torch.Tensor,
+            target: torch.Tensor
     ):
         """
         Calculate Perceptual loss for given input (x) and target image

@@ -1,29 +1,28 @@
 """
-Training script for VAE (KL) on COCO-17 dataset.
+Training script for VAE (KL) on COCO-17 or CIFAR-10 dataset.
 Uses PyTorch Lightning with WandB logging.
 
 Usage:
     python train.py --config configs/coco17-kl.yaml
+    python train.py --config configs/cifar10-kl-6gb.yaml
 """
 import os
 import argparse
 import yaml
 import torch
 import wandb
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import Resize, ToTensor, Compose, Lambda, RandomHorizontalFlip
-from torchvision.datasets import CocoCaptions
-from latent_diffusion.models import VAE
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
+
+from latent_diffusion.models import VAE
+from latent_diffusion.data.dataset import build_datamodule
 
 
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Train VAE on COCO-17 dataset",
+        description="Train VAE on COCO-17 or CIFAR-10 dataset",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -45,96 +44,9 @@ def parse_args():
     )
     return parser.parse_args()
 
-args = parse_args()
 
-print(f"Loading config from: {args.config}")
-with open(args.config, encoding="utf-8") as f:
-    cfg = yaml.safe_load(f)
-trainer_cfg = cfg["trainer"]
-
-# Transforms (set up based on resolution from config)
-resolution = cfg["encoder"]["resolution"]
-t_transforms = Compose([
-    Resize((resolution, resolution)),
-    RandomHorizontalFlip(0.5),
-    ToTensor(),
-    Lambda(lambda x: x * 2 - 1)
-])
-v_transforms = Compose([
-    Resize((resolution, resolution)),
-    ToTensor(),
-    Lambda(lambda x: x * 2 - 1)
-])
-
-def collate_fn(data):
-    """Creates mini-batch tensors from the list of tuples (image, caption).
-    
-    We should build custom collate_fn rather than using default collate_fn, 
-    because merging caption (including padding) is not supported in default.
-
-    Args:
-        data: list of tuple (image, caption). 
-            - image: torch tensor of shape (channel, height, width).
-            - caption: torch tensor of shape (?); variable length.
-
-    Returns:
-        images: torch tensor of shape (batch_size, 3, 256, 256).
-        targets: torch tensor of shape (batch_size, padded_length).
-        lengths: list; valid length for each padded caption.
-    """
-
-    images, _ = zip(*data)
-    images = torch.stack(images, 0) 
-    return images, 0
-
-
-class CocoDataModule(pl.LightningDataModule):
-    def __init__(self, train_batch_size, val_batch_size, train_root, train_ann, val_root, val_ann):
-        super().__init__()
-        self.train_batch_size = train_batch_size
-        self.val_batch_size = val_batch_size
-        self.train_root = train_root
-        self.train_ann = train_ann
-        self.val_root = val_root
-        self.val_ann = val_ann
-
-    def setup(self, stage=None):
-        self.train_data = CocoCaptions(
-                root=self.train_root,
-                annFile=self.train_ann,
-                transform=t_transforms,
-            )
-        self.val_data = CocoCaptions(
-                root=self.val_root,
-                annFile=self.val_ann,
-                transform=v_transforms,
-            )
-
-    def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.train_batch_size, shuffle=True, num_workers=4, drop_last=True, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.val_batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn, prefetch_factor=2, pin_memory=True,drop_last=True)
-
-
-# Get data paths from config (with fallback defaults)
-data_cfg = cfg.get("data", {})
-data_module = CocoDataModule(
-    train_batch_size=trainer_cfg["train_batch_size"],
-    val_batch_size=trainer_cfg["val_batch_size"],
-    train_root=data_cfg.get("train_root", "./data/coco17/train2017"),
-    train_ann=data_cfg.get("train_ann", "./data/coco17/annotations/captions_train2017.json"),
-    val_root=data_cfg.get("val_root", "./data/coco17/val2017"),
-    val_ann=data_cfg.get("val_ann", "./data/coco17/annotations/captions_val2017.json"),
-)
-#%%
-logger = TensorBoardLogger(
-    save_dir=trainer_cfg["tensorboard_log_dir"],
-    name=trainer_cfg["name"]
-)
-
+# EMACallback definition locally for now, could be moved to modules/callbacks.py
 from pytorch_lightning import Callback
-
 class EMACallback(Callback):
     def __init__(self, decay=0.9999, update_every=1):
         super().__init__()
@@ -157,7 +69,6 @@ class EMACallback(Callback):
                         self.ema_state[name].mul_(self.decay).add_(param.detach(), alpha=1 - self.decay)
 
     def on_validation_start(self, trainer, pl_module):
-        # Swap to EMA weights for validation
         self.backup = {}
         for name, param in pl_module.named_parameters():
             if name in self.ema_state:
@@ -165,7 +76,6 @@ class EMACallback(Callback):
                 param.data.copy_(self.ema_state[name])
 
     def on_validation_end(self, trainer, pl_module):
-        # Restore normal weights
         for name, param in pl_module.named_parameters():
             if name in self.backup:
                 param.data.copy_(self.backup[name])
@@ -180,6 +90,8 @@ class ImageReconstructionCallback(pl.callbacks.Callback):
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
+        if batch_idx != 0: return
+        
         images, _ = batch
         images = images[:self.num_images]
         images = images.to(pl_module.device)
@@ -188,30 +100,42 @@ class ImageReconstructionCallback(pl.callbacks.Callback):
             if isinstance(reconstructions, tuple):
                 reconstructions = reconstructions[0]
 
-        # Denormalize to [0,1] if model outputs [-1,1]
+        # Denormalize to [0,1] for visualization
+        # Assuming model works in [-1, 1]
         def denorm(x):
             return ((x + 1.0) / 2).clamp(0, 1)
 
         images = denorm(images.cpu())
         reconstructions = denorm(reconstructions.cpu())
 
-        # Log as W&B images (original and reconstruction pairs)
+        # Log as W&B images
         wandb_images = []
         for orig, recon in zip(images, reconstructions):
-            # Combine original + reconstruction in one image
-            combined = torch.cat([orig, recon], dim=2)  # concatenate width-wise
+            combined = torch.cat([orig, recon], dim=2) 
             wandb_images.append(wandb.Image(combined))
         
-        if trainer.logger is not None:
-            trainer.logger.experiment.log({
+        if trainer.logger is not None and isinstance(trainer.logger, WandbLogger):
+             trainer.logger.experiment.log({
                 "reconstructions": wandb_images
             })
+        # Also support TensorBoard
+        elif trainer.logger is not None and isinstance(trainer.logger, TensorBoardLogger):
+            grid = torch.cat([images, reconstructions], dim=0)
+            trainer.logger.experiment.add_images(
+                "Validation/Reconstruction", grid, trainer.global_step
+            )
 
 
 def main():
-    """Main training function."""
+    args = parse_args()
     print(f"Loading config from: {args.config}")
-    
+    with open(args.config, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    trainer_cfg = cfg["trainer"]
+
+    # Dynamic DataModule
+    data_module = build_datamodule(cfg)
+
     # Setup logger
     if args.no_wandb:
         logger = TensorBoardLogger(
@@ -236,7 +160,7 @@ def main():
             ImageReconstructionCallback(num_images=16),
             ModelCheckpoint(
                 dirpath=trainer_cfg.get("checkpoint_dir", "./models"),
-                monitor="fid",
+                monitor="val_loss" if "cifar" in trainer_cfg["name"].lower() else "fid", # CIDAR has no FID metric in loop usually
                 mode="min",
                 save_top_k=1,
                 filename="best-{epoch:02d}-kl",

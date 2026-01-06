@@ -78,7 +78,7 @@ class ResBlock(nn.Module):
         if hasattr(self, "tr_conv"):
             init_weights(self.tr_conv)
 
-    def forward(self, x: pt.Tensor):
+    def forward(self, x: torch.Tensor):
         """
         The [`ResBlock`] forward method.
 

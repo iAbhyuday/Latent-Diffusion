@@ -1,0 +1,68 @@
+config:
+  data:
+    num_workers: 2
+  decoder:
+    attn_resolutions: []
+    ch: 32
+    ch_mult:
+    - 1
+    - 4
+    - 4
+    in_channels: 32
+    num_resblocks: 2
+    out_channels: 3
+    resolution: 32
+  disc_config:
+    input_nc: 3
+    n_layers: 2
+    ndf: 64
+  encoder:
+    ch_factor: 64
+    ch_mult:
+    - 1
+    - 2
+    - 4
+    in_channels: 3
+    num_resblocks: 2
+    out_channels: 32
+    resolution: 32
+  perceptual_loss:
+    device: cuda
+    layers:
+    - 1
+    - 6
+    - 11
+    - 20
+    - 29
+    normalized: true
+    scale: 0.0001
+  quantizer:
+    params:
+      beta: 1e-4
+      embed_dim: 32
+      in_channels: 32
+      reduce_mean: true
+    type: kl
+  trainer:
+    accumulate_grad_batches: 4
+    adversarial_weight: 0.1
+    checkpoint_dir: ./models-6gb/
+    d_weight_max: 50.0
+    device: cuda
+    disc_lr: 2e-4
+    disc_start: 3000
+    disc_weight: 0.5
+    grad_acc_steps: 4
+    gradient_clip_val: 1.0
+    load_ckpt: false
+    lr: 2e-4
+    max_epochs: 100
+    min_lr: 1e-7
+    name: CIFAR10-6GB
+    tensorboard_log_dir: ./logs
+    train_batch_size: 32
+    use_adaptive_weight: false
+    val_batch_size: 32
+    warmup: false
+    warmup_steps: 0.1
+    weight_decay: 0.01

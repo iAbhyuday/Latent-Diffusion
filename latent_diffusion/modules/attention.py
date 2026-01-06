@@ -24,7 +24,7 @@ class AttnBlock(nn.Module):
             kernel_size=1
         )
 
-    def forward(self, x: pt.Tensor):
+    def forward(self, x: torch.Tensor):
         """
         The [`AttnBlock`] forward method.
         """

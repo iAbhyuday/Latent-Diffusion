@@ -1,0 +1,66 @@
+trainer:
+  name: "CIFAR10-6GB"
+  train_batch_size: 32  # Reduced from 128
+  val_batch_size: 32
+  accumulate_grad_batches: 4 # Effective batch 128
+  max_epochs: 100
+  tensorboard_log_dir: "./logs"
+  checkpoint_dir: "./models-6gb/"
+  lr: 2e-4
+  min_lr: 1e-7
+  disc_lr: 2e-4
+  device: "cuda"
+  warmup: False
+  warmup_steps: 0.1
+  load_ckpt: False
+  
+  # Discriminator config
+  disc_start: 3000
+  disc_weight: 0.5
+  adversarial_weight: 0.1
+  use_adaptive_weight: False
+  grad_acc_steps: 4  # Matches accumulate_grad_batches
+  
+  # Optimizer config
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
+  d_weight_max: 50.0
+
+data:
+  num_workers: 2 # Reduce workers for RAM
+  
+encoder:
+  resolution: 32
+  in_channels: 3
+  out_channels: 32
+  num_resblocks: 2 # Reduced from 3
+  ch_factor: 64
+  ch_mult: [1, 2, 4]
+
+quantizer:
+  type: "kl"
+  params:
+    in_channels: 32
+    embed_dim: 32
+    beta: 1e-4
+    reduce_mean: True
+
+decoder:
+  resolution: 32
+  in_channels: 32
+  out_channels: 3
+  num_resblocks: 2 # Reduced from 3
+  attn_resolutions: []
+  ch: 32 # Reduced from 64
+  ch_mult: [1, 4, 4]
+
+perceptual_loss:
+  layers: [1,6,11,20,29]
+  normalized: True
+  scale: 0.0001
+  device: "cuda"
+
+disc_config:
+  input_nc: 3
+  ndf: 64
+  n_layers: 2 # Reduced from 3 for 32x32 images

@@ -104,12 +104,12 @@ class VQVAE(pl.LightningModule):
         weight_decay = self.config["trainer"].get("weight_decay", 1e-2)
         optimizer = torch.optim.AdamW(
             self.parameters(), 
-            lr=self.config["trainer"]["lr"], 
+            lr=float(self.config["trainer"]["lr"]), 
             weight_decay=weight_decay
         )
         steps_per_epoch = len(self.trainer.datamodule.train_dataloader())
         if self.config["trainer"].get("warmup", False):
-            warmup_steps = self.config["trainer"].get("warmup_steps", 0.1)
+            warmup_steps = float(self.config["trainer"].get("warmup_steps", 0.1))
             self.warmup_steps = (steps_per_epoch * self.trainer.max_epochs ) / self.trainer.accumulate_grad_batches
             self.warmup_steps = int(warmup_steps * self.warmup_steps) 
             print(f"warmup_steps : {self.warmup_steps}")
@@ -121,7 +121,7 @@ class VQVAE(pl.LightningModule):
             main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=(self.trainer.max_epochs * steps_per_epoch) // self.trainer.accumulate_grad_batches - self.warmup_steps,
-                eta_min=self.config["trainer"].get("min_lr", 1e-7),
+                eta_min=float(self.config["trainer"].get("min_lr", 1e-7)),
             )
 
             scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -140,7 +140,7 @@ class VQVAE(pl.LightningModule):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=(self.trainer.max_epochs * steps_per_epoch) // self.trainer.accumulate_grad_batches,
-                eta_min=self.config["trainer"].get("min_lr", 1e-7),
+                eta_min=float(self.config["trainer"].get("min_lr", 1e-7)),
             )
             return {
                 "optimizer": optimizer,
